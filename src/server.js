@@ -8,7 +8,7 @@ const {sendMail,layout}=require("./mail");
 const app=express();
 const PORT=process.env.PORT||3000;
 app.set("trust proxy",1);
-app.use(express.json({limit:"5mb"}));
+app.use(express.json({limit:"15mb"}));
 app.use(express.urlencoded({extended:true}));
 app.use(express.static(path.join(__dirname,"..","public")));
 
@@ -17,7 +17,7 @@ await db.exec(`
 CREATE TABLE IF NOT EXISTS companies(
  id SERIAL PRIMARY KEY, name TEXT NOT NULL, code TEXT UNIQUE NOT NULL, industry TEXT,
  address TEXT, contact_email TEXT, contact_phone TEXT, status TEXT DEFAULT 'Active', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
- smtp_user TEXT, smtp_pass TEXT
+ smtp_user TEXT, smtp_pass TEXT, policy_agreement_text TEXT
 );
 CREATE TABLE IF NOT EXISTS users(
  id SERIAL PRIMARY KEY, company_id INTEGER, username TEXT UNIQUE, password_hash TEXT,
@@ -73,7 +73,16 @@ CREATE TABLE IF NOT EXISTS expenses(
  id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,category TEXT,amount REAL,expense_date TEXT,description TEXT,status TEXT DEFAULT 'Pending'
 );
 CREATE TABLE IF NOT EXISTS documents(
- id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,name TEXT,doc_type TEXT,expiry_date TEXT,status TEXT DEFAULT 'Active'
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,name TEXT,doc_type TEXT,expiry_date TEXT,status TEXT DEFAULT 'Active',
+ file_name TEXT,file_mime TEXT,file_data BYTEA,uploaded_by INTEGER,created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS agreements(
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,title TEXT,content TEXT,
+ status TEXT DEFAULT 'Pending Employee',
+ employee_signature TEXT,employee_signed_name TEXT,employee_signed_at TEXT,
+ hr_signature TEXT,hr_signed_name TEXT,hr_signed_at TEXT,hr_signed_by INTEGER,
+ director_signature TEXT,director_signed_name TEXT,director_signed_at TEXT,director_signed_by INTEGER,
+ created_at TEXT DEFAULT CURRENT_TIMESTAMP,completed_at TEXT
 );
 CREATE TABLE IF NOT EXISTS announcements(
  id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,title TEXT,body TEXT,audience TEXT DEFAULT 'All',created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -99,8 +108,11 @@ for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT"]){
 for(const col of ["email TEXT"]){
   try{await db.exec(`ALTER TABLE users ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["smtp_user TEXT","smtp_pass TEXT"]){
+for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT"]){
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
+}
+for(const col of ["file_name TEXT","file_mime TEXT","file_data BYTEA","uploaded_by INTEGER","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
+  try{await db.exec(`ALTER TABLE documents ADD COLUMN ${col}`)}catch(e){}
 }
 }
 
@@ -370,6 +382,100 @@ app.post("/api/reset-password",wrap(async(req,res)=>{
   res.json({ok:true});
 }));
 
+/* ---------------- Team (internal, non-employee logins: Director, extra HR/Manager/Finance) ---------------- */
+const TEAM_ROLES=["Director","HR Admin","Manager","Finance"];
+app.get("/api/team",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT id,username,role,email,active FROM users WHERE company_id=? AND role<>'Employee' ORDER BY id DESC").all(req.user.company_id));
+}));
+app.post("/api/team",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const x=req.body;
+  if(!TEAM_ROLES.includes(x.role))return res.status(400).json({error:"Invalid role"});
+  if(!x.username||!x.password||x.password.length<8)return res.status(400).json({error:"Username and a password (min 8 chars) are required"});
+  if(await db.prepare("SELECT id FROM users WHERE username=?").get(x.username))return res.status(400).json({error:"Username already taken"});
+  const s=crypto.randomBytes(16).toString("hex");
+  await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email) VALUES(?,?,?,?,?)").run(req.user.company_id,x.username,hash(x.password,s),x.role,x.email||null);
+  await audit(req,"CREATE","TEAM",`${x.username} (${x.role})`);
+  if(x.email){
+    sendMail(x.email,"Your BMS HRMS login",layout("Welcome to the team",
+      `<p>Hi,</p><p>You've been added as <b>${x.role}</b> on BMS Enterprise HRMS.</p>
+       <p><b>Login URL:</b> ${req.protocol}://${req.get("host")}<br><b>Username:</b> ${x.username}<br><b>Password:</b> (the one shared with you)</p>`),
+      await companySender(req.user.company_id)).catch(()=>{});
+  }
+  res.json({ok:true});
+}));
+app.post("/api/team/:id/status",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const r=await db.prepare("UPDATE users SET active=? WHERE id=? AND company_id=? AND role<>'Employee'").run(req.body.active?1:0,req.params.id,req.user.company_id);
+  if(r.changes===0)return res.status(404).json({error:"User not found"});
+  res.json({ok:true});
+}));
+
+/* ---------------- Onboarding Agreements (Employee -> HR -> Director e-signature) ---------------- */
+app.get("/api/policy-agreement",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const c=await db.prepare("SELECT policy_agreement_text FROM companies WHERE id=?").get(req.user.company_id);
+  res.json({text:c?.policy_agreement_text||""});
+}));
+app.post("/api/policy-agreement",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  await db.prepare("UPDATE companies SET policy_agreement_text=? WHERE id=?").run(req.body.text||"",req.user.company_id);
+  res.json({ok:true});
+}));
+
+app.get("/api/agreements",auth,requireCompany,wrap(async(req,res)=>{
+  let q=`SELECT a.*,e.name employee_name,e.employee_code FROM agreements a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=?`;let p=[req.user.company_id];
+  if(req.user.role==="Employee"){q+=" AND a.employee_id=?";p.push(req.user.employee_id)}
+  q+=" ORDER BY a.id DESC";
+  res.json(await db.prepare(q).all(...p));
+}));
+app.post("/api/employees/:id/agreements",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found"});
+  const company=await db.prepare("SELECT policy_agreement_text FROM companies WHERE id=?").get(req.user.company_id);
+  if(!company?.policy_agreement_text?.trim())return res.status(400).json({error:"Set up the company's Policy Agreement text first (HR Policies page)"});
+  const existing=await db.prepare("SELECT id FROM agreements WHERE employee_id=? AND company_id=? AND status<>'Completed'").get(emp.id,req.user.company_id);
+  if(existing)return res.status(400).json({error:"This employee already has an agreement in progress"});
+  const r=await db.prepare("INSERT INTO agreements(company_id,employee_id,title,content,status) VALUES(?,?,?,?,?)")
+    .run(req.user.company_id,emp.id,`Company Policy Agreement — ${emp.name}`,company.policy_agreement_text,"Pending Employee");
+  await audit(req,"CREATE","AGREEMENT",emp.employee_code);
+  res.json({id:r.lastInsertRowid});
+}));
+app.post("/api/agreements/:id/sign",auth,requireCompany,wrap(async(req,res)=>{
+  const ag=await db.prepare("SELECT * FROM agreements WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!ag)return res.status(404).json({error:"Agreement not found"});
+  const {signature,signed_name}=req.body||{};
+  if(!signature||!signed_name)return res.status(400).json({error:"Signature and name are required"});
+  const now=new Date().toISOString();
+  if(ag.status==="Pending Employee"){
+    if(req.user.role!=="Employee"||req.user.employee_id!==ag.employee_id)return res.status(403).json({error:"Only the employee can sign this step"});
+    await db.prepare("UPDATE agreements SET employee_signature=?,employee_signed_name=?,employee_signed_at=?,status='Pending HR' WHERE id=?").run(signature,signed_name,now,ag.id);
+  }else if(ag.status==="Pending HR"){
+    if(!["Super Admin","HR Admin"].includes(req.user.role))return res.status(403).json({error:"Only HR can sign this step"});
+    await db.prepare("UPDATE agreements SET hr_signature=?,hr_signed_name=?,hr_signed_at=?,hr_signed_by=?,status='Pending Director' WHERE id=?").run(signature,signed_name,now,req.user.id,ag.id);
+  }else if(ag.status==="Pending Director"){
+    if(!["Super Admin","Director"].includes(req.user.role))return res.status(403).json({error:"Only the Director can sign this step"});
+    await db.prepare("UPDATE agreements SET director_signature=?,director_signed_name=?,director_signed_at=?,director_signed_by=?,status='Completed',completed_at=? WHERE id=?").run(signature,signed_name,now,req.user.id,now,ag.id);
+  }else{
+    return res.status(400).json({error:"This agreement is already completed"});
+  }
+  await audit(req,"SIGN","AGREEMENT",String(ag.id));
+  const updated=await db.prepare("SELECT * FROM agreements WHERE id=?").get(ag.id);
+  if(updated.status==="Completed"){
+    const emp=await db.prepare("SELECT * FROM employees WHERE id=?").get(updated.employee_id);
+    const company=await db.prepare("SELECT name,contact_email,smtp_user,smtp_pass FROM companies WHERE id=?").get(req.user.company_id);
+    const sigBlock=(label,name,sig,at)=>`<div style="margin:14px 0"><b>${label}:</b> ${esc(name)} <span style="color:#64748b;font-size:12px">(${at?new Date(at).toLocaleString("en-IN"):""})</span><br>${sig?`<img src="${sig}" style="height:70px;border-bottom:1px solid #94a3b8;margin-top:4px">`:""}</div>`;
+    const html=layout(updated.title,
+      `<div style="white-space:pre-wrap;border:1px solid #e5e7eb;padding:14px;border-radius:8px;background:#f8fafc">${esc(updated.content)}</div>
+       ${sigBlock("Employee",updated.employee_signed_name,updated.employee_signature,updated.employee_signed_at)}
+       ${sigBlock("HR",updated.hr_signed_name,updated.hr_signature,updated.hr_signed_at)}
+       ${sigBlock("Director",updated.director_signed_name,updated.director_signature,updated.director_signed_at)}
+       <p style="color:#166534;font-weight:700">Fully executed on ${new Date(updated.completed_at).toLocaleString("en-IN")}</p>`);
+    const sender={smtp_user:company?.smtp_user,smtp_pass:company?.smtp_pass,name:company?.name};
+    if(emp?.email)sendMail(emp.email,`Signed: ${updated.title}`,html,sender).catch(()=>{});
+    if(company?.contact_email)sendMail(company.contact_email,`Signed: ${updated.title}`,html,sender).catch(()=>{});
+  }
+  res.json({ok:true,status:updated.status});
+}));
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+
 app.get("/api/departments",auth,requireCompany,wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM departments WHERE company_id=? ORDER BY name").all(req.user.company_id))));
 app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   try{await db.prepare("INSERT INTO departments(company_id,name) VALUES(?,?)").run(req.user.company_id,req.body.name);res.json({ok:true})}
@@ -515,14 +621,30 @@ app.post("/api/expenses/:id/status",auth,requireCompany,roles("Super Admin","HR 
 }));
 
 app.get("/api/documents",auth,requireCompany,wrap(async(req,res)=>{
-  let q=`SELECT d.*,e.name employee_name,e.employee_code FROM documents d JOIN employees e ON e.id=d.employee_id WHERE d.company_id=?`;let p=[req.user.company_id];
+  let q=`SELECT d.id,d.company_id,d.employee_id,d.name,d.doc_type,d.expiry_date,d.status,d.file_name,d.file_mime,d.created_at,e.name employee_name,e.employee_code FROM documents d JOIN employees e ON e.id=d.employee_id WHERE d.company_id=?`;let p=[req.user.company_id];
   if(req.user.role==="Employee"){q+=" AND d.employee_id=?";p.push(req.user.employee_id)}q+=" ORDER BY d.id DESC";res.json(await db.prepare(q).all(...p));
+}));
+app.get("/api/documents/:id/file",auth,requireCompany,wrap(async(req,res)=>{
+  const d=await db.prepare("SELECT * FROM documents WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!d||!d.file_data)return res.status(404).json({error:"File not found"});
+  if(req.user.role==="Employee" && d.employee_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
+  res.setHeader("Content-Type",d.file_mime||"application/octet-stream");
+  res.setHeader("Content-Disposition",`inline; filename="${(d.file_name||"document").replace(/[^\w.\-]/g,"_")}"`);
+  res.send(d.file_data);
 }));
 app.post("/api/documents",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
   const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const x=req.body;const r=await db.prepare("INSERT INTO documents(company_id,employee_id,name,doc_type,expiry_date,status) VALUES(?,?,?,?,?,?)").run(req.user.company_id,eid,x.name,x.doc_type,x.expiry_date,x.status||"Active");res.json({id:r.lastInsertRowid});
+  const x=req.body;
+  let fileBuf=null;
+  if(x.file_base64){
+    if(x.file_base64.length>13000000)return res.status(400).json({error:"File too large (max ~10MB)"});
+    fileBuf=Buffer.from(x.file_base64,"base64");
+  }
+  const r=await db.prepare("INSERT INTO documents(company_id,employee_id,name,doc_type,expiry_date,status,file_name,file_mime,file_data,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?)")
+    .run(req.user.company_id,eid,x.name,x.doc_type,x.expiry_date,x.status||"Active",x.file_name||null,x.file_mime||null,fileBuf,req.user.id);
+  res.json({id:r.lastInsertRowid});
 }));
 
 app.get("/api/announcements",auth,requireCompany,wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM announcements WHERE company_id=? ORDER BY id DESC").all(req.user.company_id))));

@@ -225,6 +225,25 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="candTable" class="tblwrap"></div></section>
 
 <section id="onboarding" class="page"><div class="pagehead"><h2>Digital Onboarding</h2></div><div id="onboardTable" class="tblwrap"></div></section>
+
+<section id="agreements" class="page"><div class="pagehead"><div><h2>Onboarding Agreements</h2><div class="desc">Employee signs first, then HR, then the Director — fully executed copies are emailed automatically.</div></div></div>
+<div id="agreementGenPanel" class="panel" style="display:none"><h3>Generate a new agreement</h3><div class="grid"><input id="agEmpPicker" list="empDL" placeholder="Type employee name/code"><button onclick="generateAgreement()">Generate Agreement</button></div><p class="small">Uses the Policy Agreement text configured on the HR Policies page.</p></div>
+<div id="agreementList"></div>
+<div class="modalbg" id="signModal"><div class="modal" style="max-width:600px">
+<h3 id="signModalTitle">Sign Agreement</h3>
+<div id="signContent" style="white-space:pre-wrap;border:1px solid #e5e7eb;padding:14px;border-radius:8px;background:#f8fafc;max-height:220px;overflow:auto;font-size:13px"></div>
+<div class="field" style="margin-top:14px"><label>Full Name (as signature)</label><input id="signName"></div>
+<label style="font-size:12px;font-weight:600;color:#64748b">Draw your signature below</label>
+<canvas id="sigPad" width="540" height="160" style="border:1px solid #cbd5e1;border-radius:8px;width:100%;touch-action:none;cursor:crosshair;background:#fff"></canvas>
+<div class="actions" style="margin-top:8px"><button class="gray sm" onclick="clearSig()">Clear</button></div>
+<div id="signErr" class="err"></div>
+<div class="actions"><button onclick="submitSign()">Sign & Submit</button><button class="gray" onclick="$('signModal').classList.remove('show')">Cancel</button></div>
+</div></div>
+</section>
+
+<section id="team" class="page"><div class="pagehead"><h2>Team</h2><div class="desc">Manage internal logins — Director (final sign-off), extra HR/Manager/Finance accounts.</div></div>
+<div class="panel"><h3>Add team member</h3><div class="grid"><input id="tmUser" placeholder="Username"><input id="tmPass" type="password" placeholder="Password (min 8 chars)"><select id="tmRole"><option>Director</option><option>HR Admin</option><option>Manager</option><option>Finance</option></select><input id="tmEmail" placeholder="Email (for login notice)"></div><button onclick="addTeamMember()">Add</button></div>
+<div id="teamTable" class="tblwrap"></div></section>
 <section id="performance" class="page"><div class="pagehead"><h2>Performance / KRA / KPI</h2></div><div class="panel"><div class="grid"><input id="peid" list="empDL" placeholder="Type employee name/code"><input id="pec" placeholder="Review Cycle"><input id="per" type="number" step=".1" placeholder="Rating"></div><textarea id="pegol" placeholder="Goals / KRA / KPI"></textarea><textarea id="pecm" placeholder="Manager comments"></textarea><button onclick="savePerformance()">Save Review</button></div><div id="perfTable" class="tblwrap"></div></section>
 
 <section id="assets" class="page"><div class="pagehead"><h2>Asset Management</h2><button id="assetAddBtn" style="display:none" onclick="$('assetForm').style.display='block'">+ Add Asset</button></div><div id="assetForm" class="panel" style="display:none"><div class="grid"><input id="ac" placeholder="Asset Code"><input id="an" placeholder="Asset Name"><input id="acat" placeholder="Category"><input id="asn" placeholder="Serial No"><input id="ae" list="empDL" placeholder="Assign to Employee (optional)"></div><button onclick="addAsset()">Save Asset</button></div>
@@ -235,7 +254,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="searchbar"><input id="expSearch" placeholder="Search employee / category..." oninput="renderExpenses()"></div>
 <div id="expenseTable" class="tblwrap"></div></section>
 
-<section id="documents" class="page"><div class="pagehead"><h2>Employee Documents</h2></div><div class="panel"><div class="grid"><div class="field" id="doeiWrap"><label>Employee (HR only)</label><input id="doei" list="empDL" placeholder="Type name or code"></div><input id="don" placeholder="Document Name"><input id="dot" placeholder="Document Type"><input id="dox" type="date" placeholder="Expiry"></div><button onclick="addDocument()">Add Document</button></div><div id="docTable" class="tblwrap"></div></section>
+<section id="documents" class="page"><div class="pagehead"><h2>Employee Documents</h2></div><div class="panel"><div class="grid"><div class="field" id="doeiWrap"><label>Employee (HR only)</label><input id="doei" list="empDL" placeholder="Type name or code"></div><input id="don" placeholder="Document Name"><input id="dot" placeholder="Document Type"><input id="dox" type="date" placeholder="Expiry"></div><div class="field"><label>File (optional, max ~10MB)</label><input id="dofile" type="file"></div><button onclick="addDocument()">Add Document</button></div><div id="docTable" class="tblwrap"></div></section>
 
 <section id="announcements" class="page"><div class="pagehead"><h2>Company Announcements</h2><button id="annAddBtn" style="display:none" onclick="$('annForm').style.display='block'">+ Publish</button></div><div id="annForm" class="panel" style="display:none"><input id="ant" placeholder="Title"><textarea id="anb" placeholder="Announcement"></textarea><select id="ana"><option>All</option><option>HR</option><option>Managers</option><option>Employees</option></select><button onclick="addAnnouncement()">Publish</button></div>
 <div id="annTable" class="tblwrap"></div></section>
@@ -251,6 +270,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <section id="audit" class="page"><div class="pagehead"><h2>Audit Log</h2></div><div class="searchbar"><input id="auditSearch" placeholder="Search user / action / module..." oninput="renderAudit()"></div><div id="auditTable" class="tblwrap"></div></section>
 <section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
 <div class="panel"><h3>Email Settings</h3><p class="small" id="emailSettingsStatus">Loading...</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Sender Gmail</label><input id="esUser" placeholder="companyhr@gmail.com"></div><div class="field"><label>App Password</label><input id="esPass" type="password" placeholder="16-char app password (leave blank to keep current)"></div></div><button onclick="saveEmailSettings()">Save</button><p class="small" style="margin-top:10px">Used to send announcements, payslips and login emails to this company's employees. Leave both blank to use the platform default sender.</p></div>
+<div class="panel"><h3>Policy Agreement</h3><p class="small" style="margin-bottom:10px">This text is used whenever you generate a new onboarding agreement for an employee (Agreements page). Editing it only affects future agreements, not ones already in progress.</p><textarea id="policyText" style="min-height:220px"></textarea><div class="actions" style="margin-top:10px"><button onclick="savePolicyText()">Save</button></div></div>
 </section>
 </main></div></div>
 
@@ -339,6 +359,7 @@ function isHR(){return ["Super Admin","HR Admin"].includes(ME.role)}
 function isMgrPlus(){return ["Super Admin","HR Admin","Manager"].includes(ME.role)}
 function isFinancePlus(){return ["Super Admin","HR Admin","Finance"].includes(ME.role)}
 function isPlatformSA(){return ME.role==="Super Admin" && !COMPANY}
+function isDirector(){return ME.role==="Director"}
 
 function empLabel(e){return `${e.employee_code} - ${e.name}`}
 function fillEmpDatalist(){$("empDL").innerHTML=EMP.map(e=>`<option value="${esc(empLabel(e))}">`).join("")}
@@ -352,6 +373,8 @@ function resolveEmp(inputId){
 }
 
 const ICONS={
+ agreements:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 3h12l4 4v14H4z"/><path d="M16 3v4h4M8 13l2 2 5-5"/></svg>',
+ team:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c.6-3.6 2.8-5.5 5.5-5.5s4.9 1.9 5.5 5.5M14 20c.4-2.6 1.9-4.2 4-4.2s3.3 1.4 3.8 4.2"/></svg>',
  dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
  companies:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 9h.01M15 9h.01M9 13h.01M15 13h.01"/></svg>',
  employees:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c1-4 3.4-6 6.5-6s5.5 2 6.5 6"/><circle cx="17.5" cy="8.5" r="2.4"/><path d="M15.5 14.2c2.3.3 4 2 4.8 5.3"/></svg>',
@@ -380,10 +403,10 @@ function navBuild(){
  sections.push({t:"Organization",items:[["employees","Employees",true]]});
  sections.push({t:"Time & Leave",items:[["attendance","Attendance",true],["leave","Leave",true]]});
  sections.push({t:"Payroll & Finance",items:[["payroll","Payroll",["Super Admin","HR Admin","Finance","Manager"].includes(r)],["expenses","Expenses",true]]});
- sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin"].includes(r)],["performance","Performance",true]]});
+ sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin"].includes(r)],["agreements","Agreements",true],["performance","Performance",true]]});
  sections.push({t:"Assets & Docs",items:[["assets","Assets",["Super Admin","HR Admin"].includes(r)],["documents","Documents",true]]});
  sections.push({t:"Engagement",items:[["announcements","Announcements",true],["tickets","HR Helpdesk",true],["exits","Exit / Separation",true]]});
- sections.push({t:"Administration",items:[["biometric","Biometric / eSSL",["Super Admin","HR Admin"].includes(r)],["audit","Audit Log",["Super Admin","HR Admin"].includes(r)],["settings","HR Policies",["Super Admin","HR Admin"].includes(r)]]});
+ sections.push({t:"Administration",items:[["team","Team",["Super Admin","HR Admin"].includes(r)],["biometric","Biometric / eSSL",["Super Admin","HR Admin"].includes(r)],["audit","Audit Log",["Super Admin","HR Admin"].includes(r)],["settings","HR Policies",["Super Admin","HR Admin"].includes(r)]]});
  $("nav").innerHTML=sections.map(s=>{
    const items=s.items.filter(x=>x[2]);
    if(!items.length)return "";
@@ -503,13 +526,15 @@ async function loadPage(id){
   if(id==="performance"){PAGEDATA.performance=await api("/api/performance");table("perfTable",["Employee","Cycle","Goals","Rating","Status"],PAGEDATA.performance.map(a=>[a.employee_code+" - "+a.name,esc(a.cycle),esc(a.goals),a.rating,statusBadge(a.status)]));}
   if(id==="assets"){PAGEDATA.assets=await api("/api/assets");renderAssets();}
   if(id==="expenses"){PAGEDATA.expenses=await api("/api/expenses");renderExpenses();}
-  if(id==="documents"){let x=await api("/api/documents");table("docTable",["Employee","Document","Type","Expiry","Status"],x.map(a=>[a.employee_code+" - "+a.employee_name,esc(a.name),esc(a.doc_type),a.expiry_date,statusBadge(a.status)]));}
+  if(id==="documents"){let x=await api("/api/documents");table("docTable",["Employee","Document","Type","Expiry","Status","File"],x.map(a=>[a.employee_code+" - "+a.employee_name,esc(a.name),esc(a.doc_type),a.expiry_date,statusBadge(a.status),a.file_name?`<a href="/api/documents/${a.id}/file" target="_blank">${esc(a.file_name)}</a>`:"-"]));}
   if(id==="announcements"){PAGEDATA.announcements=await api("/api/announcements");table("annTable",["Title","Body","Audience","Created"],PAGEDATA.announcements.map(a=>[esc(a.title),esc(a.body),a.audience,a.created_at]));}
   if(id==="tickets"){PAGEDATA.tickets=await api("/api/tickets");renderTickets();}
   if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();}
   if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);}
   if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
-  if(id==="settings"){loadEmailSettings();}
+  if(id==="settings"){loadEmailSettings();loadPolicyText();}
+  if(id==="agreements"){await loadAgreements();}
+  if(id==="team"){await loadTeam();}
  }catch(e){console.error(e)}
 }
 
@@ -566,7 +591,7 @@ function renderEmployees(){
   const rows=filterRows(PAGEDATA.employees||[],["employee_code","name","department","designation","branch"],q);
   $("empCount").textContent=`(${rows.length} of ${(PAGEDATA.employees||[]).length})`;
   table("empTable",["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),esc(e.name),esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),statusBadge(e.status),
-    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button></div>`:""]));
+    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button><button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
 }
 
 /* ---------- Attendance ---------- */
@@ -689,10 +714,25 @@ function renderExpenses(){
 }
 
 /* ---------- Documents ---------- */
+function readFileAsBase64(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=()=>resolve(r.result.split(",")[1]);
+    r.onerror=reject;
+    r.readAsDataURL(file);
+  });
+}
 async function addDocument(){
   const eid=isHR()?resolveEmp("doei"):ME.employee_id;
   if(isHR() && !eid)return alert("Select a valid employee");
-  try{await api("/api/documents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,name:$("don").value,doc_type:$("dot").value,expiry_date:$("dox").value})});alert("Document record added");$("doei").value="";loadPage("documents")}catch(e){alert(e.message)}
+  const body={employee_id:eid,name:$("don").value,doc_type:$("dot").value,expiry_date:$("dox").value};
+  const file=$("dofile").files[0];
+  if(file){
+    if(file.size>10*1024*1024)return alert("File too large (max 10MB)");
+    body.file_base64=await readFileAsBase64(file);
+    body.file_name=file.name;body.file_mime=file.type;
+  }
+  try{await api("/api/documents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Document record added");$("doei").value="";$("dofile").value="";loadPage("documents")}catch(e){alert(e.message)}
 }
 
 /* ---------- Announcements ---------- */
@@ -800,6 +840,87 @@ async function loadEmailSettings(){
 async function saveEmailSettings(){
   try{await api("/api/email-settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({smtp_user:$("esUser").value,smtp_pass:$("esPass").value})});alert("Email settings saved");$("esPass").value="";loadEmailSettings();}
   catch(e){alert(e.message)}
+}
+
+/* ---------- Team ---------- */
+async function loadTeam(){
+  const rows=await api("/api/team");
+  table("teamTable",["Username","Role","Email","Status","Action"],rows.map(u=>[esc(u.username),`<span class="chip">${esc(u.role)}</span>`,esc(u.email||"-"),statusBadge(u.active?"Active":"Inactive"),
+    `<button class="sm ${u.active?'red':'green'}" onclick="toggleTeamStatus(${u.id},${u.active?0:1})">${u.active?"Deactivate":"Activate"}</button>`]));
+}
+async function addTeamMember(){
+  const body={username:$("tmUser").value,password:$("tmPass").value,role:$("tmRole").value,email:$("tmEmail").value};
+  try{await api("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Team member added");["tmUser","tmPass","tmEmail"].forEach(id=>$(id).value="");loadTeam();}catch(e){alert(e.message)}
+}
+async function toggleTeamStatus(id,active){try{await api(`/api/team/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({active})});loadTeam();}catch(e){alert(e.message)}}
+
+/* ---------- Policy Agreement text (Settings) ---------- */
+async function loadPolicyText(){try{const d=await api("/api/policy-agreement");$("policyText").value=d.text||"";}catch(e){}}
+async function savePolicyText(){try{await api("/api/policy-agreement",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:$("policyText").value})});alert("Policy Agreement saved");}catch(e){alert(e.message)}}
+
+/* ---------- Onboarding Agreements + e-signature ---------- */
+let AGREEMENTS_CACHE=[];
+async function loadAgreements(){
+  if($("agreementGenPanel"))$("agreementGenPanel").style.display=isHR()?"block":"none";
+  const rows=await api("/api/agreements");
+  AGREEMENTS_CACHE=rows;
+  const mySigStep=a=>{
+    if(a.status==="Pending Employee")return ME.role==="Employee" && ME.employee_id===a.employee_id;
+    if(a.status==="Pending HR")return ["Super Admin","HR Admin"].includes(ME.role);
+    if(a.status==="Pending Director")return ["Super Admin","Director"].includes(ME.role);
+    return false;
+  };
+  if(!rows.length){$("agreementList").innerHTML=`<div class="panel"><div class="emptystate">No agreements yet</div></div>`;return}
+  $("agreementList").innerHTML=rows.map(a=>`
+    <div class="panel">
+      <div class="toolbar"><div><b>${esc(a.title)}</b><div class="small">${esc(a.employee_code)} - ${esc(a.employee_name)} · Created ${new Date(a.created_at).toLocaleDateString("en-IN")}</div></div>${statusBadge(a.status)}</div>
+      <div class="small" style="margin:8px 0">Employee: ${a.employee_signed_name?`✓ ${esc(a.employee_signed_name)}`:"pending"} &nbsp;·&nbsp; HR: ${a.hr_signed_name?`✓ ${esc(a.hr_signed_name)}`:"pending"} &nbsp;·&nbsp; Director: ${a.director_signed_name?`✓ ${esc(a.director_signed_name)}`:"pending"}</div>
+      ${mySigStep(a)?`<button onclick="openSign(${a.id})">Review & Sign</button>`:(a.status==="Completed"?`<span class="badge ok">Fully executed</span>`:`<span class="small">Waiting on ${a.status.replace("Pending ","")}</span>`)}
+    </div>`).join("");
+}
+async function generateAgreement(){
+  const eid=resolveEmp("agEmpPicker");if(!eid)return alert("Select a valid employee");
+  try{await api(`/api/employees/${eid}/agreements`,{method:"POST"});alert("Agreement generated");$("agEmpPicker").value="";loadAgreements();}catch(e){alert(e.message)}
+}
+async function quickGenerateAgreement(empId){
+  if(!confirm("Generate an onboarding agreement for this employee using the current Policy Agreement text?"))return;
+  try{await api(`/api/employees/${empId}/agreements`,{method:"POST"});alert("Agreement generated. Go to Agreements page to track signing.");}catch(e){alert(e.message)}
+}
+let CURRENT_SIGN_ID=null,SIG_DRAWING=false,SIG_CTX=null;
+function setupSigPad(){
+  const c=$("sigPad");
+  const ratio=c.width/c.getBoundingClientRect().width||1;
+  SIG_CTX=c.getContext("2d");SIG_CTX.lineWidth=2.2;SIG_CTX.lineCap="round";SIG_CTX.strokeStyle="#0f172a";
+  const pos=e=>{const r=c.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return [(t.clientX-r.left)*(c.width/r.width),(t.clientY-r.top)*(c.height/r.height)]};
+  const start=e=>{SIG_DRAWING=true;const[x,y]=pos(e);SIG_CTX.beginPath();SIG_CTX.moveTo(x,y);e.preventDefault()};
+  const move=e=>{if(!SIG_DRAWING)return;const[x,y]=pos(e);SIG_CTX.lineTo(x,y);SIG_CTX.stroke();e.preventDefault()};
+  const end=()=>SIG_DRAWING=false;
+  c.onmousedown=start;c.onmousemove=move;window.addEventListener("mouseup",end);
+  c.ontouchstart=start;c.ontouchmove=move;c.ontouchend=end;
+}
+function clearSig(){SIG_CTX&&SIG_CTX.clearRect(0,0,$("sigPad").width,$("sigPad").height)}
+function openSign(id){
+  const a=AGREEMENTS_CACHE.find(x=>x.id===id);if(!a)return;
+  CURRENT_SIGN_ID=id;
+  $("signModalTitle").textContent=a.title;
+  $("signContent").textContent=a.content;
+  $("signName").value=ME.username;
+  $("signErr").textContent="";
+  $("signModal").classList.add("show");
+  setTimeout(()=>{setupSigPad();clearSig();},50);
+}
+async function submitSign(){
+  const name=$("signName").value.trim();
+  if(!name)return $("signErr").textContent="Enter your full name";
+  const blank=document.createElement("canvas");blank.width=$("sigPad").width;blank.height=$("sigPad").height;
+  if($("sigPad").toDataURL()===blank.toDataURL())return $("signErr").textContent="Please draw your signature";
+  const signature=$("sigPad").toDataURL("image/png");
+  try{
+    await api(`/api/agreements/${CURRENT_SIGN_ID}/sign`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({signature,signed_name:name})});
+    $("signModal").classList.remove("show");
+    alert("Signed successfully");
+    loadAgreements();
+  }catch(e){$("signErr").textContent=e.message}
 }
 
 /* ---------- Password ---------- */
