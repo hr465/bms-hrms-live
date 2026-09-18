@@ -26,15 +26,19 @@ CREATE TABLE IF NOT EXISTS users(
 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id INTEGER,expires_at BIGINT,active_company_id INTEGER);
 CREATE TABLE IF NOT EXISTS employees(
  id SERIAL PRIMARY KEY, company_id INTEGER NOT NULL, employee_code TEXT, name TEXT, email TEXT, phone TEXT,
- department TEXT, designation TEXT, manager TEXT, branch TEXT, joining_date TEXT, status TEXT DEFAULT 'Active',
+ department TEXT, designation TEXT, manager TEXT, reporting_manager_id INTEGER, branch TEXT, joining_date TEXT, status TEXT DEFAULT 'Active',
  biometric_id TEXT, salary REAL DEFAULT 0, bank_name TEXT, bank_account TEXT, ifsc TEXT,
+ pf_number TEXT, esic_number TEXT, uan_number TEXT, pan_number TEXT,
+ date_of_birth TEXT, basic_salary REAL DEFAULT 0, hra REAL DEFAULT 0, other_allowances REAL DEFAULT 0,
+ pf_applicable INTEGER DEFAULT 0, esic_applicable INTEGER DEFAULT 0,
  created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(company_id,employee_code)
 );
 CREATE TABLE IF NOT EXISTS departments(id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,name TEXT,UNIQUE(company_id,name));
 CREATE TABLE IF NOT EXISTS leave_types(id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,name TEXT,annual_balance REAL DEFAULT 0,UNIQUE(company_id,name));
 CREATE TABLE IF NOT EXISTS leave_requests(
  id SERIAL PRIMARY KEY, company_id INTEGER NOT NULL, employee_id INTEGER, leave_type TEXT, from_date TEXT, to_date TEXT,
- days REAL, reason TEXT, status TEXT DEFAULT 'Pending', approved_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+ days REAL, reason TEXT, status TEXT DEFAULT 'Pending', approved_by TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+ category TEXT DEFAULT 'Leave'
 );
 CREATE TABLE IF NOT EXISTS attendance(
  id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,work_date TEXT,first_in TEXT,last_out TEXT,
@@ -52,6 +56,7 @@ CREATE TABLE IF NOT EXISTS biometric_devices(
 CREATE TABLE IF NOT EXISTS payroll(
  id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,month TEXT,gross REAL DEFAULT 0,deductions REAL DEFAULT 0,
  lop REAL DEFAULT 0,ot REAL DEFAULT 0,net REAL DEFAULT 0,status TEXT DEFAULT 'Draft',payslip_no TEXT,
+ pf_employee REAL DEFAULT 0,esic_employee REAL DEFAULT 0,tds REAL DEFAULT 0,lop_days REAL DEFAULT 0,
  UNIQUE(employee_id,month)
 );
 CREATE TABLE IF NOT EXISTS candidates(
@@ -114,6 +119,27 @@ for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT"
 for(const col of ["file_name TEXT","file_mime TEXT","file_data BYTEA","uploaded_by INTEGER","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
   try{await db.exec(`ALTER TABLE documents ADD COLUMN ${col}`)}catch(e){}
 }
+for(const col of ["reporting_manager_id INTEGER","pf_number TEXT","esic_number TEXT","uan_number TEXT","pan_number TEXT","date_of_birth TEXT","basic_salary REAL DEFAULT 0","hra REAL DEFAULT 0","other_allowances REAL DEFAULT 0","pf_applicable INTEGER DEFAULT 0","esic_applicable INTEGER DEFAULT 0"]){
+  try{await db.exec(`ALTER TABLE employees ADD COLUMN ${col}`)}catch(e){}
+}
+for(const col of ["category TEXT DEFAULT 'Leave'"]){
+  try{await db.exec(`ALTER TABLE leave_requests ADD COLUMN ${col}`)}catch(e){}
+}
+for(const col of ["pf_employee REAL DEFAULT 0","esic_employee REAL DEFAULT 0","tds REAL DEFAULT 0","lop_days REAL DEFAULT 0"]){
+  try{await db.exec(`ALTER TABLE payroll ADD COLUMN ${col}`)}catch(e){}
+}
+for(const [oldN,newN] of [["Casual Leave","CL - Casual Leave"],["Sick Leave","SL - Sick Leave"],["Earned Leave","PL - Privilege Leave"]]){
+  try{await db.exec(`UPDATE leave_types SET name='${newN}' WHERE name='${oldN}'`)}catch(e){}
+}
+for(const [idx,sql] of Object.entries({
+  ux_emp_pf:"CREATE UNIQUE INDEX IF NOT EXISTS ux_emp_pf ON employees(company_id,pf_number) WHERE pf_number IS NOT NULL AND pf_number<>''",
+  ux_emp_esic:"CREATE UNIQUE INDEX IF NOT EXISTS ux_emp_esic ON employees(company_id,esic_number) WHERE esic_number IS NOT NULL AND esic_number<>''",
+  ux_emp_uan:"CREATE UNIQUE INDEX IF NOT EXISTS ux_emp_uan ON employees(company_id,uan_number) WHERE uan_number IS NOT NULL AND uan_number<>''",
+  ux_emp_pan:"CREATE UNIQUE INDEX IF NOT EXISTS ux_emp_pan ON employees(company_id,pan_number) WHERE pan_number IS NOT NULL AND pan_number<>''",
+  ux_emp_bio:"CREATE UNIQUE INDEX IF NOT EXISTS ux_emp_bio ON employees(company_id,biometric_id) WHERE biometric_id IS NOT NULL AND biometric_id<>''"
+})){
+  try{await db.exec(sql)}catch(e){}
+}
 }
 
 const hash=(p,s)=>crypto.scryptSync(p,s,64).toString("hex")+":"+s;
@@ -128,7 +154,7 @@ async function seedCompanyDefaults(companyId){
   for(const n of ["Operations","HR","Finance","IT","Sales","Admin"]){
     await db.prepare("INSERT OR IGNORE INTO departments(company_id,name) VALUES(?,?)").run(companyId,n);
   }
-  for(const [n,b] of [["Casual Leave",12],["Sick Leave",12],["Earned Leave",18],["Unpaid Leave",0]]){
+  for(const [n,b] of [["CL - Casual Leave",12],["SL - Sick Leave",12],["PL - Privilege Leave",18],["Unpaid Leave",0]]){
     await db.prepare("INSERT OR IGNORE INTO leave_types(company_id,name,annual_balance) VALUES(?,?,?)").run(companyId,n,b);
   }
 }
@@ -264,6 +290,29 @@ app.post("/api/switch-company",auth,roles("Super Admin"),wrap(async(req,res)=>{
   res.json({ok:true});
 }));
 
+app.get("/api/calendar",auth,requireCompany,wrap(async(req,res)=>{
+  const rows=await db.prepare("SELECT id,name,employee_code,date_of_birth,joining_date,department FROM employees WHERE company_id=? AND status='Active'").all(req.user.company_id);
+  const today=new Date();
+  const upcoming=(dateStr,type)=>{
+    if(!dateStr)return null;
+    const d=new Date(dateStr);
+    if(isNaN(d))return null;
+    let next=new Date(today.getFullYear(),d.getMonth(),d.getDate());
+    if(next<new Date(today.getFullYear(),today.getMonth(),today.getDate()))next.setFullYear(next.getFullYear()+1);
+    const daysAway=Math.round((next-new Date(today.getFullYear(),today.getMonth(),today.getDate()))/86400000);
+    return {type,date:next.toISOString().slice(0,10),daysAway,years:type==="anniversary"?(next.getFullYear()-d.getFullYear()):null};
+  };
+  const events=[];
+  for(const e of rows){
+    const b=upcoming(e.date_of_birth,"birthday");
+    if(b)events.push({employee_id:e.id,name:e.name,employee_code:e.employee_code,department:e.department,...b});
+    const a=upcoming(e.joining_date,"anniversary");
+    if(a)events.push({employee_id:e.id,name:e.name,employee_code:e.employee_code,department:e.department,...a});
+  }
+  events.sort((x,y)=>x.daysAway-y.daysAway);
+  res.json(events);
+}));
+
 app.get("/api/dashboard",auth,wrap(async(req,res)=>{
   const today=new Date().toISOString().slice(0,10);
   if(req.user.role==="Super Admin" && !req.user.company_id){
@@ -293,25 +342,33 @@ app.get("/api/dashboard",auth,wrap(async(req,res)=>{
 app.get("/api/employees",auth,requireCompany,wrap(async(req,res)=>{
   let rows=await db.prepare("SELECT * FROM employees WHERE company_id=? ORDER BY id DESC").all(req.user.company_id);
   if(req.user.role==="Employee") rows=rows.filter(x=>x.id===req.user.employee_id);
+  else if(req.user.role==="Manager" && req.user.employee_id) rows=rows.filter(x=>x.reporting_manager_id===req.user.employee_id || x.id===req.user.employee_id);
   res.json(rows);
 }));
+function friendlyDupError(e){
+  const m=e.message||"";
+  const map={ux_emp_pf:"PF Number",ux_emp_esic:"ESIC Number",ux_emp_uan:"UAN Number",ux_emp_pan:"PAN Number",ux_emp_bio:"Biometric ID"};
+  for(const [idx,label] of Object.entries(map)) if(m.includes(idx))return `This ${label} is already used by another employee in this company`;
+  if(m.includes("employee_code")||/duplicate key|unique/i.test(m))return "Employee code already exists";
+  return m;
+}
 app.post("/api/employees",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
   try{
-    const r=await db.prepare(`INSERT INTO employees(company_id,employee_code,name,email,phone,department,designation,manager,branch,joining_date,status,biometric_id,salary,bank_name,bank_account,ifsc)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.company_id,x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.branch,x.joining_date,x.status||"Active",x.biometric_id,x.salary||0,x.bank_name,x.bank_account,x.ifsc);
+    const r=await db.prepare(`INSERT INTO employees(company_id,employee_code,name,email,phone,department,designation,manager,reporting_manager_id,branch,joining_date,status,biometric_id,salary,bank_name,bank_account,ifsc,pf_number,esic_number,uan_number,pan_number,date_of_birth,basic_salary,hra,other_allowances,pf_applicable,esic_applicable)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.company_id,x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.reporting_manager_id||null,x.branch,x.joining_date,x.status||"Active",x.biometric_id||null,x.salary||0,x.bank_name,x.bank_account,x.ifsc,x.pf_number||null,x.esic_number||null,x.uan_number||null,x.pan_number||null,x.date_of_birth||null,x.basic_salary||0,x.hra||0,x.other_allowances||0,+!!x.pf_applicable,+!!x.esic_applicable);
     await db.prepare("INSERT OR IGNORE INTO onboarding(company_id,employee_id) VALUES(?,?)").run(req.user.company_id,r.lastInsertRowid);
     await audit(req,"CREATE","EMPLOYEE",x.employee_code);res.json({id:r.lastInsertRowid});
-  }catch(e){res.status(400).json({error:/duplicate key|unique/i.test(e.message)?"Employee code already exists":e.message})}
+  }catch(e){res.status(400).json({error:friendlyDupError(e)})}
 }));
 app.put("/api/employees/:id",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
   try{
-    const r=await db.prepare(`UPDATE employees SET employee_code=?,name=?,email=?,phone=?,department=?,designation=?,manager=?,branch=?,joining_date=?,status=?,biometric_id=?,salary=?,bank_name=?,bank_account=?,ifsc=? WHERE id=? AND company_id=?`)
-      .run(x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.branch,x.joining_date,x.status||"Active",x.biometric_id,x.salary||0,x.bank_name,x.bank_account,x.ifsc,req.params.id,req.user.company_id);
+    const r=await db.prepare(`UPDATE employees SET employee_code=?,name=?,email=?,phone=?,department=?,designation=?,manager=?,reporting_manager_id=?,branch=?,joining_date=?,status=?,biometric_id=?,salary=?,bank_name=?,bank_account=?,ifsc=?,pf_number=?,esic_number=?,uan_number=?,pan_number=?,date_of_birth=?,basic_salary=?,hra=?,other_allowances=?,pf_applicable=?,esic_applicable=? WHERE id=? AND company_id=?`)
+      .run(x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.reporting_manager_id||null,x.branch,x.joining_date,x.status||"Active",x.biometric_id||null,x.salary||0,x.bank_name,x.bank_account,x.ifsc,x.pf_number||null,x.esic_number||null,x.uan_number||null,x.pan_number||null,x.date_of_birth||null,x.basic_salary||0,x.hra||0,x.other_allowances||0,+!!x.pf_applicable,+!!x.esic_applicable,req.params.id,req.user.company_id);
     if(r.changes===0)return res.status(404).json({error:"Employee not found"});
     await audit(req,"UPDATE","EMPLOYEE",x.employee_code);res.json({ok:true});
-  }catch(e){res.status(400).json({error:e.message})}
+  }catch(e){res.status(400).json({error:friendlyDupError(e)})}
 }));
 app.post("/api/employees/:id/status",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const r=await db.prepare("UPDATE employees SET status=? WHERE id=? AND company_id=?").run(req.body.status,req.params.id,req.user.company_id);
@@ -385,15 +442,21 @@ app.post("/api/reset-password",wrap(async(req,res)=>{
 /* ---------------- Team (internal, non-employee logins: Director, extra HR/Manager/Finance) ---------------- */
 const TEAM_ROLES=["Director","HR Admin","Manager","Finance"];
 app.get("/api/team",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
-  res.json(await db.prepare("SELECT id,username,role,email,active FROM users WHERE company_id=? AND role<>'Employee' ORDER BY id DESC").all(req.user.company_id));
+  res.json(await db.prepare(`SELECT u.id,u.username,u.role,u.email,u.active,e.name employee_name,e.employee_code FROM users u LEFT JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.role<>'Employee' ORDER BY u.id DESC`).all(req.user.company_id));
 }));
 app.post("/api/team",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
   if(!TEAM_ROLES.includes(x.role))return res.status(400).json({error:"Invalid role"});
   if(!x.username||!x.password||x.password.length<8)return res.status(400).json({error:"Username and a password (min 8 chars) are required"});
   if(await db.prepare("SELECT id FROM users WHERE username=?").get(x.username))return res.status(400).json({error:"Username already taken"});
+  let linkedEmployeeId=null;
+  if(x.employee_id){
+    const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(x.employee_id,req.user.company_id);
+    if(!emp)return res.status(400).json({error:"Selected employee not found in this company"});
+    linkedEmployeeId=emp.id;
+  }
   const s=crypto.randomBytes(16).toString("hex");
-  await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email) VALUES(?,?,?,?,?)").run(req.user.company_id,x.username,hash(x.password,s),x.role,x.email||null);
+  await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email,employee_id) VALUES(?,?,?,?,?,?)").run(req.user.company_id,x.username,hash(x.password,s),x.role,x.email||null,linkedEmployeeId);
   await audit(req,"CREATE","TEAM",`${x.username} (${x.role})`);
   if(x.email){
     sendMail(x.email,"Your BMS HRMS login",layout("Welcome to the team",
@@ -486,6 +549,7 @@ app.get("/api/attendance",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT a.*,e.employee_code,e.name,e.department FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=?`;
   let params=[req.user.company_id];
   if(req.user.role==="Employee"){q+=" AND e.id=?";params.push(req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";params.push(req.user.employee_id,req.user.employee_id)}
   q+=" ORDER BY a.work_date DESC,a.first_in DESC";
   res.json(await db.prepare(q).all(...params));
 }));
@@ -504,14 +568,17 @@ app.post("/api/attendance/manual",auth,requireCompany,wrap(async(req,res)=>{
 app.get("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT l.*,e.employee_code,e.name FROM leave_requests l JOIN employees e ON e.id=l.employee_id WHERE l.company_id=?`;
   let p=[req.user.company_id];if(req.user.role==="Employee"){q+=" AND l.employee_id=?";p.push(req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
+  if(req.query.category){q+=" AND l.category=?";p.push(req.query.category)}
   q+=" ORDER BY l.id DESC";res.json(await db.prepare(q).all(...p));
 }));
 app.post("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
   const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const r=await db.prepare(`INSERT INTO leave_requests(company_id,employee_id,leave_type,from_date,to_date,days,reason) VALUES(?,?,?,?,?,?,?)`)
-    .run(req.user.company_id,eid,req.body.leave_type,req.body.from_date,req.body.to_date,Number(req.body.days)||1,req.body.reason||"");
+  const category=["WFH","Permission"].includes(req.body.category)?req.body.category:"Leave";
+  const r=await db.prepare(`INSERT INTO leave_requests(company_id,employee_id,leave_type,from_date,to_date,days,reason,category) VALUES(?,?,?,?,?,?,?,?)`)
+    .run(req.user.company_id,eid,req.body.leave_type,req.body.from_date,req.body.to_date,Number(req.body.days)||1,req.body.reason||"",category);
   await audit(req,"CREATE","LEAVE",String(r.lastInsertRowid));res.json({id:r.lastInsertRowid});
 }));
 app.post("/api/leaves/:id/status",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>{
@@ -524,41 +591,93 @@ app.get("/api/leaves/balance",auth,requireCompany,wrap(async(req,res)=>{
   if(!eid)return res.json([]);
   const year=new Date().toISOString().slice(0,4);
   const types=await db.prepare("SELECT * FROM leave_types WHERE company_id=?").all(req.user.company_id);
-  const used=await db.prepare(`SELECT leave_type,COALESCE(SUM(days),0) d FROM leave_requests WHERE employee_id=? AND company_id=? AND status='Approved' AND from_date LIKE ? GROUP BY leave_type`).all(eid,req.user.company_id,year+"%");
+  const used=await db.prepare(`SELECT leave_type,COALESCE(SUM(days),0) d FROM leave_requests WHERE employee_id=? AND company_id=? AND status='Approved' AND category='Leave' AND from_date LIKE ? GROUP BY leave_type`).all(eid,req.user.company_id,year+"%");
   const usedMap=Object.fromEntries(used.map(u=>[u.leave_type,u.d]));
   res.json(types.map(t=>({leave_type:t.name,annual_balance:t.annual_balance,used:usedMap[t.name]||0,remaining:t.annual_balance-(usedMap[t.name]||0)})));
 }));
 
-app.get("/api/payroll",auth,requireCompany,roles("Super Admin","HR Admin","Finance","Manager"),wrap(async(req,res)=>{
-  res.json(await db.prepare(`SELECT p.*,e.employee_code,e.name FROM payroll p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=? ORDER BY p.id DESC`).all(req.user.company_id));
-}));
-app.post("/api/payroll",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
-  const x=req.body;
-  const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(x.employee_id,req.user.company_id);
-  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const gross=Number(x.gross)||0,deductions=Number(x.deductions)||0,lop=Number(x.lop)||0,ot=Number(x.ot)||0,net=gross-deductions-lop+ot;
-  const no="BMS-"+Date.now();
-  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no) VALUES(?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no`)
-    .run(req.user.company_id,x.employee_id,x.month,gross,deductions,lop,ot,net,x.status||"Processed",no);
-  await audit(req,"UPSERT","PAYROLL",x.month);
+async function computePayroll(companyId,emp,month){
+  const [y,m]=month.split("-").map(Number);
+  const daysInMonth=new Date(y,m,0).getDate();
+  const atts=await db.prepare("SELECT status FROM attendance WHERE employee_id=? AND work_date LIKE ?").all(emp.id,month+"%");
+  let absentDays=atts.filter(a=>a.status==="Absent").length + atts.filter(a=>a.status==="Half Day").length*0.5;
+  const unpaidLeaves=await db.prepare("SELECT COALESCE(SUM(days),0) d FROM leave_requests WHERE employee_id=? AND status='Approved' AND category='Leave' AND leave_type ILIKE '%Unpaid%' AND from_date LIKE ?").get(emp.id,month+"%");
+  const lopDays=Math.min(daysInMonth,absentDays+Number(unpaidLeaves.d||0));
+  const basic=Number(emp.basic_salary)||0,hra=Number(emp.hra)||0,other=Number(emp.other_allowances)||0;
+  const gross=basic+hra+other;
+  const perDay=gross/daysInMonth;
+  const lop=+(perDay*lopDays).toFixed(2);
+  const payableRatio=(daysInMonth-lopDays)/daysInMonth;
+  const pfEmployee=emp.pf_applicable?+(basic*payableRatio*0.12).toFixed(2):0;
+  const esicEmployee=(emp.esic_applicable && gross<=21000)?+(gross*payableRatio*0.0075).toFixed(2):0;
+  return {daysInMonth,lopDays,gross:+gross.toFixed(2),lop,pfEmployee,esicEmployee,basic,hra,other};
+}
+async function processOnePayroll(req,employeeId,month,overrides={}){
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(employeeId,req.user.company_id);
+  if(!emp)throw Object.assign(new Error("Employee not found in this company"),{status:404});
+  const calc=await computePayroll(req.user.company_id,emp,month);
+  const gross=overrides.gross!=null?Number(overrides.gross):calc.gross;
+  const deductions=Number(overrides.deductions)||0;
+  const lop=overrides.lop!=null?Number(overrides.lop):calc.lop;
+  const ot=Number(overrides.ot)||0;
+  const pfEmployee=overrides.pf_employee!=null?Number(overrides.pf_employee):calc.pfEmployee;
+  const esicEmployee=overrides.esic_employee!=null?Number(overrides.esic_employee):calc.esicEmployee;
+  const tds=Number(overrides.tds)||0;
+  const net=+(gross-deductions-lop-pfEmployee-esicEmployee-tds+ot).toFixed(2);
+  const no="BMS-"+Date.now()+"-"+employeeId;
+  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no,pf_employee,esic_employee,tds,lop_days) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no,pf_employee=excluded.pf_employee,esic_employee=excluded.esic_employee,tds=excluded.tds,lop_days=excluded.lop_days`)
+    .run(req.user.company_id,employeeId,month,gross,deductions,lop,ot,net,overrides.status||"Processed",no,pfEmployee,esicEmployee,tds,calc.lopDays);
+  await audit(req,"UPSERT","PAYROLL",month+":"+emp.employee_code);
   if(emp.email){
     const company=await db.prepare("SELECT name,smtp_user,smtp_pass FROM companies WHERE id=?").get(req.user.company_id);
     const inr=n=>"₹"+Number(n).toLocaleString("en-IN");
-    sendMail(emp.email,`Payslip for ${x.month} — ${company?.name||"BMS HRMS"}`,layout(`Payslip — ${x.month}`,
-      `<p>Hi ${emp.name},</p><p>Your payslip for <b>${x.month}</b> has been processed.</p>
+    sendMail(emp.email,`Payslip for ${month} — ${company?.name||"BMS HRMS"}`,layout(`Payslip — ${month}`,
+      `<p>Hi ${emp.name},</p><p>Your payslip for <b>${month}</b> has been processed.</p>
        <table style="width:100%;border-collapse:collapse;margin-top:10px">
        <tr><td style="padding:6px;border:1px solid #e5e7eb">Payslip No</td><td style="padding:6px;border:1px solid #e5e7eb">${no}</td></tr>
        <tr><td style="padding:6px;border:1px solid #e5e7eb">Gross</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(gross)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">Deductions</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(deductions)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">LOP</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(lop)}</td></tr>
+       <tr><td style="padding:6px;border:1px solid #e5e7eb">LOP (${calc.lopDays} day(s))</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(lop)}</td></tr>
+       <tr><td style="padding:6px;border:1px solid #e5e7eb">PF (Employee)</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(pfEmployee)}</td></tr>
+       <tr><td style="padding:6px;border:1px solid #e5e7eb">ESIC (Employee)</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(esicEmployee)}</td></tr>
+       <tr><td style="padding:6px;border:1px solid #e5e7eb">TDS</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(tds)}</td></tr>
+       <tr><td style="padding:6px;border:1px solid #e5e7eb">Other Deductions</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(deductions)}</td></tr>
        <tr><td style="padding:6px;border:1px solid #e5e7eb">Overtime</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(ot)}</td></tr>
        <tr><td style="padding:6px;border:1px solid #e5e7eb"><b>Net Pay</b></td><td style="padding:6px;border:1px solid #e5e7eb"><b>${inr(net)}</b></td></tr>
        </table>
        <p style="font-size:12px;color:#64748b">Log in to the HRMS to view or print your full payslip.</p>`),
       {smtp_user:company?.smtp_user,smtp_pass:company?.smtp_pass,name:company?.name}).catch(()=>{});
   }
-  res.json({ok:true,net,payslip_no:no});
+  return {net,payslip_no:no,gross,lop,pfEmployee,esicEmployee};
+}
+
+app.get("/api/payroll",auth,requireCompany,roles("Super Admin","HR Admin","Finance","Manager"),wrap(async(req,res)=>{
+  res.json(await db.prepare(`SELECT p.*,e.employee_code,e.name FROM payroll p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=? ORDER BY p.id DESC`).all(req.user.company_id));
+}));
+app.get("/api/payroll/calculate",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.query.employee_id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
+  if(!req.query.month)return res.status(400).json({error:"month is required (YYYY-MM)"});
+  res.json(await computePayroll(req.user.company_id,emp,req.query.month));
+}));
+app.post("/api/payroll/run-month",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const month=req.body.month;
+  if(!month)return res.status(400).json({error:"month is required (YYYY-MM)"});
+  const employees=await db.prepare("SELECT id FROM employees WHERE company_id=? AND status='Active'").all(req.user.company_id);
+  let processed=0,skipped=0;
+  for(const e of employees){
+    const already=await db.prepare("SELECT id FROM payroll WHERE employee_id=? AND month=?").get(e.id,month);
+    if(already && !req.body.overwrite){skipped++;continue}
+    try{await processOnePayroll(req,e.id,month,{});processed++}catch(err){skipped++}
+  }
+  res.json({ok:true,processed,skipped,total:employees.length});
+}));
+app.post("/api/payroll",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const x=req.body;
+  try{
+    const r=await processOnePayroll(req,x.employee_id,x.month,x);
+    res.json({ok:true,net:r.net,payslip_no:r.payslip_no});
+  }catch(e){res.status(e.status||400).json({error:e.message})}
 }));
 
 app.get("/api/candidates",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM candidates WHERE company_id=? ORDER BY id DESC").all(req.user.company_id))));
@@ -606,7 +725,9 @@ app.post("/api/assets",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(
 
 app.get("/api/expenses",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT x.*,e.name employee_name,e.employee_code FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?`;let p=[req.user.company_id];
-  if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id)}q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
+  if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
+  q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
 }));
 app.post("/api/expenses",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);

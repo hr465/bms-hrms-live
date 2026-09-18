@@ -197,10 +197,22 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="empForm" class="panel" style="display:none"><h3>Employee details</h3><div class="grid">
 <div class="field"><label>Employee Code</label><input id="ec"></div><div class="field"><label>Name</label><input id="en"></div><div class="field"><label>Email</label><input id="ee"></div>
 <div class="field"><label>Phone</label><input id="ep"></div><div class="field"><label>Department</label><input id="ed"></div><div class="field"><label>Designation</label><input id="eg"></div>
-<div class="field"><label>Manager</label><input id="em"></div><div class="field"><label>Branch</label><input id="eb"></div><div class="field"><label>Joining Date</label><input id="ej" type="date"></div>
-<div class="field"><label>Biometric ID</label><input id="ebi"></div><div class="field"><label>Salary</label><input id="es" type="number"></div><div class="field"><label>Status</label><select id="est"><option>Active</option><option>Inactive</option></select></div>
+<div class="field"><label>Reporting Manager</label><input id="em" list="empDL" placeholder="Type manager's name/code"></div><div class="field"><label>Branch</label><input id="eb"></div><div class="field"><label>Joining Date</label><input id="ej" type="date"></div>
+<div class="field"><label>Date of Birth</label><input id="edob" type="date"></div><div class="field"><label>Biometric ID</label><input id="ebi"></div><div class="field"><label>Status</label><select id="est"><option>Active</option><option>Inactive</option></select></div>
+</div>
+<h3 style="margin-top:18px">Bank Details</h3><div class="grid">
 <div class="field"><label>Bank Name</label><input id="ebn"></div><div class="field"><label>Bank Account</label><input id="eba"></div><div class="field"><label>IFSC</label><input id="eifsc"></div>
-</div><input type="hidden" id="editEmpId"><div class="actions"><button onclick="saveEmployee()" id="empSaveBtn">Save Employee</button><button class="gray" onclick="resetEmpForm()">Clear</button></div></div>
+</div>
+<h3 style="margin-top:18px">Statutory Details</h3><div class="grid">
+<div class="field"><label>PF Number</label><input id="epf"></div><div class="field"><label>UAN Number</label><input id="euan"></div><div class="field"><label>ESIC Number</label><input id="eesic"></div>
+<div class="field"><label>PAN Number</label><input id="epan"></div>
+<div class="field"><label><input type="checkbox" id="epfapp" style="width:auto;display:inline-block;margin-right:6px">PF Applicable</label></div>
+<div class="field"><label><input type="checkbox" id="eesicapp" style="width:auto;display:inline-block;margin-right:6px">ESIC Applicable</label></div>
+</div>
+<h3 style="margin-top:18px">Salary Structure (CTC)</h3><div class="grid">
+<div class="field"><label>Basic Salary (monthly)</label><input id="ebasic" type="number"></div><div class="field"><label>HRA (monthly)</label><input id="ehra" type="number"></div><div class="field"><label>Other Allowances (monthly)</label><input id="eoa" type="number"></div>
+</div>
+<input type="hidden" id="editEmpId"><div class="actions"><button onclick="saveEmployee()" id="empSaveBtn">Save Employee</button><button class="gray" onclick="resetEmpForm()">Clear</button></div></div>
 <div class="toolbar"><div class="searchbar"><input id="empSearch" placeholder="Search name / code / dept..." oninput="renderEmployees()"></div></div>
 <div id="empTable" class="tblwrap"></div></section>
 
@@ -212,11 +224,16 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 
 <section id="leave" class="page"><div class="pagehead"><h2>Leave Management</h2></div>
 <div id="leaveBalance" class="cards" style="margin-bottom:14px"></div>
-<div class="panel"><div class="grid"><div class="field" id="leidWrap"><label>Employee (HR/Manager)</label><input id="leid" list="empDL" placeholder="Type name or code"></div><div><label>Leave Type</label><select id="let"><option>Casual Leave</option><option>Sick Leave</option><option>Earned Leave</option><option>Unpaid Leave</option></select></div><div><label>Days</label><input id="led" type="number" value="1"></div><div><label>From</label><input id="lef" type="date"></div><div><label>To</label><input id="letd" type="date"></div></div><textarea id="ler" placeholder="Reason"></textarea><button onclick="applyLeave()">Apply Leave</button></div>
+<div class="panel"><div class="grid"><div class="field" id="leidWrap"><label>Employee (HR/Manager)</label><input id="leid" list="empDL" placeholder="Type name or code"></div>
+<div><label>Category</label><select id="lecat" onchange="onLeaveCatChange()"><option value="Leave">Leave</option><option value="WFH">Work From Home</option><option value="Permission">Permission (short leave)</option></select></div>
+<div id="letWrap"><label>Leave Type</label><select id="let"><option>CL - Casual Leave</option><option>SL - Sick Leave</option><option>PL - Privilege Leave</option><option>Unpaid Leave</option></select></div>
+<div><label>Days</label><input id="led" type="number" value="1" step="0.5"></div><div><label>From</label><input id="lef" type="date"></div><div><label>To</label><input id="letd" type="date"></div></div><textarea id="ler" placeholder="Reason"></textarea><button onclick="applyLeave()">Submit</button></div>
 <div class="searchbar"><input id="leaveSearch" placeholder="Search employee / type..." oninput="renderLeaves()"></div>
 <div id="leaveTable" class="tblwrap"></div></section>
 
-<section id="payroll" class="page"><div class="pagehead"><h2>Payroll</h2></div><div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code"></div><div><label>Month</label><input id="pem" type="month"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Deductions</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div></div><button onclick="savePayroll()">Process Payroll</button></div>
+<section id="payroll" class="page"><div class="pagehead"><h2>Payroll</h2></div>
+<div id="payBulkPanel" class="panel" style="display:none"><h3>Run payroll for the whole company</h3><div class="grid" style="grid-template-columns:1fr 1fr"><input id="pbMonth" type="month"><button onclick="runMonthPayroll()">Run Payroll for Month</button></div><p class="small">Auto-calculates gross, LOP (from attendance/unpaid leave), PF and ESIC for every active employee who doesn't already have payroll for that month, and emails each payslip.</p></div>
+<div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code" onchange="autoCalcPayroll()"></div><div><label>Month</label><input id="pem" type="month" onchange="autoCalcPayroll()"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Deductions (other)</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>LOP Days</label><input id="peld" type="number" readonly style="background:#f1f5f9"></div><div><label>PF (Employee)</label><input id="pepf" type="number"></div><div><label>ESIC (Employee)</label><input id="pees" type="number"></div><div><label>TDS</label><input id="petds" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div></div><div class="actions"><button class="outline" onclick="autoCalcPayroll()">Auto-Calculate</button><button onclick="savePayroll()">Process Payroll</button></div></div>
 <div class="searchbar"><input id="paySearch" placeholder="Search employee / month..." oninput="renderPayroll()"></div>
 <div id="payTable" class="tblwrap"></div></section>
 
@@ -242,7 +259,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 </section>
 
 <section id="team" class="page"><div class="pagehead"><h2>Team</h2><div class="desc">Manage internal logins — Director (final sign-off), extra HR/Manager/Finance accounts.</div></div>
-<div class="panel"><h3>Add team member</h3><div class="grid"><input id="tmUser" placeholder="Username"><input id="tmPass" type="password" placeholder="Password (min 8 chars)"><select id="tmRole"><option>Director</option><option>HR Admin</option><option>Manager</option><option>Finance</option></select><input id="tmEmail" placeholder="Email (for login notice)"></div><button onclick="addTeamMember()">Add</button></div>
+<div class="panel"><h3>Add team member</h3><div class="grid"><input id="tmUser" placeholder="Username"><input id="tmPass" type="password" placeholder="Password (min 8 chars)"><select id="tmRole"><option>Director</option><option>HR Admin</option><option>Manager</option><option>Finance</option></select><input id="tmEmail" placeholder="Email (for login notice)"><input id="tmEmpLink" list="empDL" placeholder="Link to employee record (optional)"></div><p class="small">Linking a Manager to their employee record lets them see only the team reporting to them.</p><button onclick="addTeamMember()">Add</button></div>
 <div id="teamTable" class="tblwrap"></div></section>
 <section id="performance" class="page"><div class="pagehead"><h2>Performance / KRA / KPI</h2></div><div class="panel"><div class="grid"><input id="peid" list="empDL" placeholder="Type employee name/code"><input id="pec" placeholder="Review Cycle"><input id="per" type="number" step=".1" placeholder="Rating"></div><textarea id="pegol" placeholder="Goals / KRA / KPI"></textarea><textarea id="pecm" placeholder="Manager comments"></textarea><button onclick="savePerformance()">Save Review</button></div><div id="perfTable" class="tblwrap"></div></section>
 
@@ -255,6 +272,8 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="expenseTable" class="tblwrap"></div></section>
 
 <section id="documents" class="page"><div class="pagehead"><h2>Employee Documents</h2></div><div class="panel"><div class="grid"><div class="field" id="doeiWrap"><label>Employee (HR only)</label><input id="doei" list="empDL" placeholder="Type name or code"></div><input id="don" placeholder="Document Name"><input id="dot" placeholder="Document Type"><input id="dox" type="date" placeholder="Expiry"></div><div class="field"><label>File (optional, max ~10MB)</label><input id="dofile" type="file"></div><button onclick="addDocument()">Add Document</button></div><div id="docTable" class="tblwrap"></div></section>
+
+<section id="calendar" class="page"><div class="pagehead"><div><h2>Calendar</h2><div class="desc">Upcoming birthdays and work anniversaries</div></div></div><div id="calendarList"></div></section>
 
 <section id="announcements" class="page"><div class="pagehead"><h2>Company Announcements</h2><button id="annAddBtn" style="display:none" onclick="$('annForm').style.display='block'">+ Publish</button></div><div id="annForm" class="panel" style="display:none"><input id="ant" placeholder="Title"><textarea id="anb" placeholder="Announcement"></textarea><select id="ana"><option>All</option><option>HR</option><option>Managers</option><option>Employees</option></select><button onclick="addAnnouncement()">Publish</button></div>
 <div id="annTable" class="tblwrap"></div></section>
@@ -371,8 +390,15 @@ function resolveEmp(inputId){
   if(!m)m=EMP.find(e=>empLabel(e).toLowerCase().includes(v));
   return m?m.id:null;
 }
+function setEmpInput(inputId,empId){
+  const el=$(inputId);if(!el)return;
+  if(!empId){el.value="";return}
+  const e=EMP.find(x=>x.id===empId);
+  el.value=e?empLabel(e):"";
+}
 
 const ICONS={
+ calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v3M16 3v3"/><path d="M12 13a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM7 17a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/></svg>',
  agreements:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 3h12l4 4v14H4z"/><path d="M16 3v4h4M8 13l2 2 5-5"/></svg>',
  team:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c.6-3.6 2.8-5.5 5.5-5.5s4.9 1.9 5.5 5.5M14 20c.4-2.6 1.9-4.2 4-4.2s3.3 1.4 3.8 4.2"/></svg>',
  dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
@@ -405,7 +431,7 @@ function navBuild(){
  sections.push({t:"Payroll & Finance",items:[["payroll","Payroll",["Super Admin","HR Admin","Finance","Manager"].includes(r)],["expenses","Expenses",true]]});
  sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin"].includes(r)],["agreements","Agreements",true],["performance","Performance",true]]});
  sections.push({t:"Assets & Docs",items:[["assets","Assets",["Super Admin","HR Admin"].includes(r)],["documents","Documents",true]]});
- sections.push({t:"Engagement",items:[["announcements","Announcements",true],["tickets","HR Helpdesk",true],["exits","Exit / Separation",true]]});
+ sections.push({t:"Engagement",items:[["calendar","Calendar",true],["announcements","Announcements",true],["tickets","HR Helpdesk",true],["exits","Exit / Separation",true]]});
  sections.push({t:"Administration",items:[["team","Team",["Super Admin","HR Admin"].includes(r)],["biometric","Biometric / eSSL",["Super Admin","HR Admin"].includes(r)],["audit","Audit Log",["Super Admin","HR Admin"].includes(r)],["settings","HR Policies",["Super Admin","HR Admin"].includes(r)]]});
  $("nav").innerHTML=sections.map(s=>{
    const items=s.items.filter(x=>x[2]);
@@ -432,6 +458,7 @@ function applyRoleVisibility(){
   if($("assetAddBtn"))$("assetAddBtn").style.display=isHR()?"":"none";
   if($("annAddBtn"))$("annAddBtn").style.display=isHR()?"":"none";
   if($("payForm"))$("payForm").style.display=isFinancePlus()?"":"none";
+  if($("payBulkPanel"))$("payBulkPanel").style.display=isFinancePlus()?"":"none";
 }
 
 async function refreshMe(){
@@ -534,6 +561,7 @@ async function loadPage(id){
   if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
   if(id==="settings"){loadEmailSettings();loadPolicyText();}
   if(id==="agreements"){await loadAgreements();}
+  if(id==="calendar"){await loadCalendar();}
   if(id==="team"){await loadTeam();}
  }catch(e){console.error(e)}
 }
@@ -554,18 +582,26 @@ function renderCompanies(){
 
 /* ---------- Employees ---------- */
 function showEmpForm(){resetEmpForm();$("empForm").style.display="block"}
-function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","eb","ej","ebi","es","ebn","eba","eifsc"].forEach(id=>$(id).value="");$("est").value="Active";$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee"}
+function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","eb","ej","edob","ebi","ebn","eba","eifsc","epf","euan","eesic","epan","ebasic","ehra","eoa"].forEach(id=>$(id).value="");$("est").value="Active";$("epfapp").checked=false;$("eesicapp").checked=false;$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee"}
 function editEmployee(id){
   const e=EMP.find(x=>x.id===id);if(!e)return;
   $("ec").value=e.employee_code||"";$("en").value=e.name||"";$("ee").value=e.email||"";$("ep").value=e.phone||"";
-  $("ed").value=e.department||"";$("eg").value=e.designation||"";$("em").value=e.manager||"";$("eb").value=e.branch||"";
-  $("ej").value=e.joining_date||"";$("ebi").value=e.biometric_id||"";$("es").value=e.salary||0;$("est").value=e.status||"Active";
+  $("ed").value=e.department||"";$("eg").value=e.designation||"";$("eb").value=e.branch||"";
+  setEmpInput("em",e.reporting_manager_id);
+  $("ej").value=e.joining_date||"";$("edob").value=e.date_of_birth||"";$("ebi").value=e.biometric_id||"";$("est").value=e.status||"Active";
   $("ebn").value=e.bank_name||"";$("eba").value=e.bank_account||"";$("eifsc").value=e.ifsc||"";
+  $("epf").value=e.pf_number||"";$("euan").value=e.uan_number||"";$("eesic").value=e.esic_number||"";$("epan").value=e.pan_number||"";
+  $("epfapp").checked=!!e.pf_applicable;$("eesicapp").checked=!!e.esic_applicable;
+  $("ebasic").value=e.basic_salary||0;$("ehra").value=e.hra||0;$("eoa").value=e.other_allowances||0;
   $("editEmpId").value=e.id;$("empSaveBtn").textContent="Update Employee";
   $("empForm").style.display="block";$("empForm").scrollIntoView({behavior:"smooth"});
 }
 async function saveEmployee(){
-  const body={employee_code:$("ec").value,name:$("en").value,email:$("ee").value,phone:$("ep").value,department:$("ed").value,designation:$("eg").value,manager:$("em").value,branch:$("eb").value,joining_date:$("ej").value,biometric_id:$("ebi").value,salary:$("es").value,status:$("est").value,bank_name:$("ebn").value,bank_account:$("eba").value,ifsc:$("eifsc").value};
+  const rmId=$("em").value?resolveEmp("em"):null;
+  const rmName=rmId?EMP.find(x=>x.id===rmId)?.name:"";
+  const body={employee_code:$("ec").value,name:$("en").value,email:$("ee").value,phone:$("ep").value,department:$("ed").value,designation:$("eg").value,manager:rmName,reporting_manager_id:rmId,branch:$("eb").value,joining_date:$("ej").value,date_of_birth:$("edob").value,biometric_id:$("ebi").value,status:$("est").value,bank_name:$("ebn").value,bank_account:$("eba").value,ifsc:$("eifsc").value,
+    pf_number:$("epf").value,uan_number:$("euan").value,esic_number:$("eesic").value,pan_number:$("epan").value,pf_applicable:$("epfapp").checked,esic_applicable:$("eesicapp").checked,
+    basic_salary:$("ebasic").value,hra:$("ehra").value,other_allowances:$("eoa").value};
   const editId=$("editEmpId").value;
   try{
     if(editId)await api("/api/employees/"+editId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -617,10 +653,13 @@ async function loadLeaveBalance(){
     $("leaveBalance").innerHTML=b.map(x=>`<div class="card"><div class="bar"></div><div class="lbl">${esc(x.leave_type)}</div><div class="num">${x.remaining}</div><div class="small">of ${x.annual_balance} (used ${x.used})</div></div>`).join("");
   }catch(e){}
 }
+function onLeaveCatChange(){$("letWrap").style.display=$("lecat").value==="Leave"?"":"none"}
 async function applyLeave(){
   const eid=isMgrPlus()?resolveEmp("leid"):ME.employee_id;
   if(isMgrPlus() && !eid)return alert("Select a valid employee");
-  try{await api("/api/leaves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type:$("let").value,days:$("led").value,from_date:$("lef").value,to_date:$("letd").value,reason:$("ler").value})});alert("Leave submitted");$("leid").value="";loadPage("leave")}catch(e){alert(e.message)}
+  const category=$("lecat").value;
+  const leave_type=category==="Leave"?$("let").value:category;
+  try{await api("/api/leaves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type,category,days:$("led").value,from_date:$("lef").value,to_date:$("letd").value,reason:$("ler").value})});alert("Submitted");$("leid").value="";loadPage("leave")}catch(e){alert(e.message)}
 }
 async function leaveStatus(id,status){
   try{await api(`/api/leaves/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("leave")}catch(e){alert(e.message)}
@@ -629,14 +668,27 @@ function renderLeaves(){
   if(needsCompany("leaveTable"))return;
   const q=$("leaveSearch").value;
   const rows=filterRows((PAGEDATA.leave||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","leave_type"],q);
-  table("leaveTable",["Employee","Type","From","To","Days","Status","Approved By","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.name),a.leave_type,a.from_date,a.to_date,a.days,statusBadge(a.status),a.approved_by||"-",
+  table("leaveTable",["Employee","Category","Type","From","To","Days","Status","Approved By","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.name),a.category&&a.category!=="Leave"?`<span class="chip">${esc(a.category)}</span>`:"Leave",a.leave_type&&a.category==="Leave"?a.leave_type:"-",a.from_date,a.to_date,a.days,statusBadge(a.status),a.approved_by||"-",
     (isMgrPlus() && a.status==="Pending")?`<div class="actions"><button class="sm green" onclick="leaveStatus(${a.id},'Approved')">Approve</button><button class="sm red" onclick="leaveStatus(${a.id},'Rejected')">Reject</button></div>`:""]));
 }
 
 /* ---------- Payroll ---------- */
+async function autoCalcPayroll(){
+  const eid=resolveEmp("pei");const month=$("pem").value;
+  if(!eid||!month)return;
+  try{
+    const c=await api(`/api/payroll/calculate?employee_id=${eid}&month=${month}`);
+    $("peg").value=c.gross;$("pel").value=c.lop;$("peld").value=c.lopDays;$("pepf").value=c.pfEmployee;$("pees").value=c.esicEmployee;
+  }catch(e){alert(e.message)}
+}
 async function savePayroll(){
   const eid=resolveEmp("pei");if(!eid)return alert("Select a valid employee");
-  try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,ot:$("peo").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
+  try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,pf_employee:$("pepf").value,esic_employee:$("pees").value,tds:$("petds").value,ot:$("peo").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
+}
+async function runMonthPayroll(){
+  const month=$("pbMonth").value;if(!month)return alert("Select a month");
+  if(!confirm(`Run payroll for the whole company for ${month}? This will process every active employee who doesn't already have payroll for this month, and email payslips.`))return;
+  try{const d=await api("/api/payroll/run-month",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({month})});alert(`Done. Processed ${d.processed}, skipped ${d.skipped} (already had payroll), of ${d.total} active employees.`);loadPage("payroll")}catch(e){alert(e.message)}
 }
 function printPayslip(row){
   $("payslipPrint").innerHTML=`<h2>${esc(COMPANY?COMPANY.name:"Company")}</h2><div>Payslip — ${esc(row.month)}</div>
@@ -644,7 +696,10 @@ function printPayslip(row){
   <tr><th>Payslip No</th><td>${esc(row.payslip_no)}</td></tr>
   <tr><th>Gross</th><td>₹${Number(row.gross).toLocaleString("en-IN")}</td></tr>
   <tr><th>Deductions</th><td>₹${Number(row.deductions).toLocaleString("en-IN")}</td></tr>
-  <tr><th>LOP</th><td>₹${Number(row.lop).toLocaleString("en-IN")}</td></tr>
+  <tr><th>LOP (${row.lop_days||0} day(s))</th><td>₹${Number(row.lop).toLocaleString("en-IN")}</td></tr>
+  <tr><th>PF (Employee)</th><td>₹${Number(row.pf_employee||0).toLocaleString("en-IN")}</td></tr>
+  <tr><th>ESIC (Employee)</th><td>₹${Number(row.esic_employee||0).toLocaleString("en-IN")}</td></tr>
+  <tr><th>TDS</th><td>₹${Number(row.tds||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>Overtime</th><td>₹${Number(row.ot).toLocaleString("en-IN")}</td></tr>
   <tr><th>Net Pay</th><td><b>₹${Number(row.net).toLocaleString("en-IN")}</b></td></tr>
   <tr><th>Status</th><td>${esc(row.status)}</td></tr></table>`;
@@ -657,7 +712,7 @@ function renderPayroll(){
   const q=$("paySearch").value;
   const rows=filterRows((PAGEDATA.payroll||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","month"],q);
   window.__payrows=rows;
-  table("payTable",["Employee","Month","Gross","Deduction","LOP","OT","Net","Status","Payslip","Action"],rows.map((a,i)=>[esc(a.employee_code+" - "+a.name),a.month,a.gross,a.deductions,a.lop,a.ot,"₹"+Number(a.net).toLocaleString("en-IN"),statusBadge(a.status),a.payslip_no,`<button class="sm outline" onclick='printPayslip(window.__payrows[${i}])'>Print</button>`]));
+  table("payTable",["Employee","Month","Gross","LOP","PF","ESIC","TDS","OT","Net","Status","Payslip","Action"],rows.map((a,i)=>[esc(a.employee_code+" - "+a.name),a.month,a.gross,a.lop,a.pf_employee||0,a.esic_employee||0,a.tds||0,a.ot,"₹"+Number(a.net).toLocaleString("en-IN"),statusBadge(a.status),a.payslip_no,`<button class="sm outline" onclick='printPayslip(window.__payrows[${i}])'>Print</button>`]));
 }
 
 /* ---------- Recruitment ---------- */
@@ -842,15 +897,27 @@ async function saveEmailSettings(){
   catch(e){alert(e.message)}
 }
 
+/* ---------- Calendar ---------- */
+async function loadCalendar(){
+  if(needsCompany("calendarList"))return;
+  const rows=await api("/api/calendar");
+  const near=rows.filter(r=>r.daysAway<=60);
+  if(!near.length){$("calendarList").innerHTML=`<div class="panel"><div class="emptystate">No upcoming birthdays or anniversaries in the next 60 days</div></div>`;return}
+  $("calendarList").innerHTML=`<div class="tblwrap">`+`<table><thead><tr><th>Employee</th><th>Event</th><th>Date</th><th>In</th></tr></thead><tbody>`+
+    near.map(r=>`<tr><td>${esc(r.employee_code)} - ${esc(r.name)}</td><td>${r.type==="birthday"?"Birthday":`Work Anniversary (${r.years} yr${r.years===1?"":"s"})`}</td><td>${new Date(r.date).toLocaleDateString("en-IN",{day:"numeric",month:"short"})}</td><td>${r.daysAway===0?statusBadge("Today"):r.daysAway+" day(s)"}</td></tr>`).join("")+
+    `</tbody></table></div>`;
+}
+
 /* ---------- Team ---------- */
 async function loadTeam(){
   const rows=await api("/api/team");
-  table("teamTable",["Username","Role","Email","Status","Action"],rows.map(u=>[esc(u.username),`<span class="chip">${esc(u.role)}</span>`,esc(u.email||"-"),statusBadge(u.active?"Active":"Inactive"),
+  table("teamTable",["Username","Role","Linked Employee","Email","Status","Action"],rows.map(u=>[esc(u.username),`<span class="chip">${esc(u.role)}</span>`,u.employee_name?esc(u.employee_code+" - "+u.employee_name):"-",esc(u.email||"-"),statusBadge(u.active?"Active":"Inactive"),
     `<button class="sm ${u.active?'red':'green'}" onclick="toggleTeamStatus(${u.id},${u.active?0:1})">${u.active?"Deactivate":"Activate"}</button>`]));
 }
 async function addTeamMember(){
-  const body={username:$("tmUser").value,password:$("tmPass").value,role:$("tmRole").value,email:$("tmEmail").value};
-  try{await api("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Team member added");["tmUser","tmPass","tmEmail"].forEach(id=>$(id).value="");loadTeam();}catch(e){alert(e.message)}
+  const empId=$("tmEmpLink").value?resolveEmp("tmEmpLink"):null;
+  const body={username:$("tmUser").value,password:$("tmPass").value,role:$("tmRole").value,email:$("tmEmail").value,employee_id:empId};
+  try{await api("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Team member added");["tmUser","tmPass","tmEmail","tmEmpLink"].forEach(id=>$(id).value="");loadTeam();}catch(e){alert(e.message)}
 }
 async function toggleTeamStatus(id,active){try{await api(`/api/team/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({active})});loadTeam();}catch(e){alert(e.message)}}
 
