@@ -1,0 +1,814 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMS Enterprise HRMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+:root{
+ --ink:#0f172a;--sub:#64748b;--line:#e6e9f0;--bg:#f6f7fb;--card:#ffffff;
+ --brand:#4f46e5;--brand-dark:#3730a3;--brand-soft:#eef0ff;
+ --ok-bg:#dcfce7;--ok-fg:#166534;--warn-bg:#fef3c7;--warn-fg:#92400e;--bad-bg:#fee2e2;--bad-fg:#991b1b;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",Inter,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+a{color:inherit}
+
+/* ---------- Login ---------- */
+.loginwrap{display:none;min-height:100vh}
+.loginwrap.show{display:flex}
+.loginbrand{flex:1.1;background:linear-gradient(150deg,var(--brand-dark),var(--brand) 60%,#6d28d9);color:#fff;padding:60px;display:flex;flex-direction:column;justify-content:space-between}
+.loginbrand h1{font-size:30px;margin:0 0 6px}
+.loginbrand .tag{opacity:.85;font-size:14px;max-width:360px;line-height:1.5}
+.loginbrand .feat{margin-top:40px;display:flex;flex-direction:column;gap:14px;font-size:13px;opacity:.92}
+.loginbrand .feat div{display:flex;align-items:center;gap:10px}
+.loginbrand .dot{width:7px;height:7px;border-radius:50%;background:#fff}
+.loginside{flex:1;display:flex;align-items:center;justify-content:center;padding:40px;background:#fff}
+.loginbox{width:100%;max-width:360px}
+.loginbox h2{margin:0 0 4px;font-size:22px}
+.loginbox .small{color:var(--sub);margin-bottom:26px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;color:var(--sub);margin-bottom:5px;letter-spacing:.2px}
+input,select,textarea{width:100%;padding:10px 12px;border:1px solid #d7dbe4;border-radius:8px;background:#fff;font-size:13.5px;font-family:inherit;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:0;border-color:var(--brand)}
+textarea{min-height:80px}
+button{border:0;border-radius:8px;padding:10px 15px;background:var(--brand);color:#fff;cursor:pointer;font-size:13.5px;font-weight:600;transition:.15s}
+button:hover{background:var(--brand-dark)}
+button.gray{background:#eef0f4;color:#334155}button.gray:hover{background:#e2e5ec}
+button.red{background:var(--bad-fg)}button.green{background:#15803d}
+button.sm{padding:6px 10px;font-size:12px;font-weight:600}
+button.outline{background:#fff;color:var(--brand);border:1px solid var(--brand)}button.outline:hover{background:var(--brand-soft)}
+button.block{width:100%}
+.demoBox{margin-top:22px;padding:14px;background:#f8f9fc;border:1px solid var(--line);border-radius:10px;font-size:12px;color:var(--sub);line-height:1.7}
+.err{color:var(--bad-fg);font-size:12.5px;min-height:16px;margin:4px 0}
+
+/* ---------- App shell ---------- */
+#app{display:none}
+#app.show{display:block}
+header{height:60px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;position:sticky;top:0;z-index:10}
+.brandmark{display:flex;align-items:center;gap:10px}
+.brandmark .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(140deg,var(--brand),#7c3aed);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+.brandmark .co{font-size:14.5px;font-weight:700}
+.brandmark .co .sub{font-size:11px;color:var(--sub);font-weight:500}
+.topuser{display:flex;align-items:center;gap:10px}
+.avatar{width:32px;height:32px;border-radius:50%;background:var(--brand-soft);color:var(--brand-dark);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px}
+.who{font-size:12.5px;line-height:1.3}
+.who b{display:block;font-size:13px}
+.compswitch{position:relative}
+.compswitch>button{background:#f8f9fc;color:var(--ink);border:1px solid var(--line);font-weight:600;display:flex;align-items:center;gap:6px}
+.compswitch>button:hover{background:#f1f2f7}
+.complist{display:none;position:absolute;right:0;top:40px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 40px #0002;width:260px;max-height:340px;overflow:auto;z-index:20;padding:6px}
+.complist.show{display:block}
+.complist .opt{padding:9px 10px;border-radius:7px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between}
+.complist .opt:hover{background:var(--brand-soft)}
+.complist .opt.sel{background:var(--brand-soft);color:var(--brand-dark);font-weight:600}
+
+.layout{display:flex;min-height:calc(100vh - 60px)}
+aside{width:236px;background:#fff;border-right:1px solid var(--line);padding:16px 12px;position:sticky;top:60px;height:calc(100vh - 60px);overflow:auto}
+.navgroup{margin-bottom:16px}
+.navgroup .gt{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:#94a3b8;font-weight:700;padding:0 10px;margin-bottom:6px}
+nav button.item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;color:#334155;margin:1px 0;padding:8px 10px;font-weight:500;border-radius:8px;font-size:13.5px}
+nav button.item:hover{background:#f4f5f9}
+nav button.item.sel{background:var(--brand-soft);color:var(--brand-dark);font-weight:700}
+nav .ic{width:16px;height:16px;flex:none;display:inline-flex}
+nav .ic svg{width:16px;height:16px}
+
+main{flex:1;padding:26px 30px;max-width:1500px;margin:auto;width:100%}
+.page{display:none}.page.active{display:block}
+.pagehead{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px}
+.pagehead h2{margin:0;font-size:20px}
+.pagehead .desc{font-size:12.5px;color:var(--sub);margin-top:3px}
+
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;position:relative;overflow:hidden}
+.card .lbl{font-size:12px;color:var(--sub);font-weight:600}
+.card .num{font-size:26px;font-weight:800;margin-top:8px;color:var(--ink)}
+.card .bar{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--brand)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin:16px 0}
+.panel h3{margin:0 0 14px;font-size:15px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+th,td{padding:11px 12px;border-bottom:1px solid #f0f1f5;text-align:left;font-size:13px}
+th{background:#fafbfd;font-weight:700;color:#475569;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px}
+tr:last-child td{border-bottom:0}
+.badge{padding:4px 9px;border-radius:99px;background:var(--brand-soft);color:var(--brand-dark);font-size:11px;font-weight:700;display:inline-block}
+.badge.ok{background:var(--ok-bg);color:var(--ok-fg)}
+.badge.warn{background:var(--warn-bg);color:var(--warn-fg)}
+.badge.bad{background:var(--bad-bg);color:var(--bad-fg)}
+.small{font-size:12px;color:var(--sub)}
+.notice{padding:12px 14px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;font-size:13px}
+.searchbar{display:flex;gap:8px;margin-bottom:12px;max-width:340px}
+.toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px}
+.tblwrap{overflow:auto}
+.modalbg{display:none;position:fixed;inset:0;background:#0f172acc;z-index:30;align-items:center;justify-content:center}
+.modalbg.show{display:flex}
+.modal{background:#fff;border-radius:14px;padding:24px;max-width:460px;width:92%;max-height:88vh;overflow:auto}
+.modal h3{margin-top:0}
+.chip{display:inline-block;padding:3px 9px;border-radius:6px;background:#f1f2f7;font-size:11px;font-weight:700;color:#475569;margin-right:6px}
+.emptystate{padding:40px 20px;text-align:center;color:var(--sub);font-size:13px}
+.trend{display:flex;align-items:flex-end;gap:6px;height:70px;margin-top:10px}
+.trend .b{flex:1;background:var(--brand);border-radius:4px 4px 0 0;opacity:.85;min-height:2px}
+.trend .lb{font-size:10px;color:var(--sub);text-align:center;margin-top:4px}
+@media(max-width:950px){aside{width:190px}.cards{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr 1fr}}
+@media(max-width:650px){aside{display:none}.cards,.grid{grid-template-columns:1fr}main{padding:16px}.loginbrand{display:none}}
+#payslipPrint{display:none}
+body.printing>*:not(#payslipPrint){display:none!important}
+body.printing #payslipPrint{display:block!important;padding:30px;max-width:650px;margin:auto}
+body.printing #payslipPrint table{width:100%;border-collapse:collapse;margin-top:14px}
+body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #ccc;padding:8px;text-align:left}
+</style>
+</head>
+<body>
+
+<div id="loginwrap" class="loginwrap">
+  <div class="loginbrand">
+    <div class="brandmark" style="color:#fff"><div class="logo">BMS</div><div><div class="co" style="color:#fff">Bhartiya Management Solutions</div><div class="sub" style="color:#dbe0ff">Enterprise HRMS</div></div></div>
+    <div>
+      <h1>One platform for every company you run.</h1>
+      <div class="tag">Onboard companies, manage employees, attendance, payroll, recruitment and more — all from a single, secure, role-based console.</div>
+      <div class="feat">
+        <div><span class="dot"></span> Multi-company workspace with isolated data</div>
+        <div><span class="dot"></span> Role-based access — Admin, HR, Manager, Finance, Employee</div>
+        <div><span class="dot"></span> Attendance, Leave, Payroll and Recruitment built in</div>
+      </div>
+    </div>
+    <div style="font-size:12px;opacity:.75">© 2026 Bhartiya Management Solutions</div>
+  </div>
+  <div class="loginside">
+    <div class="loginbox">
+      <h2>Sign in</h2>
+      <div class="small">Enter your credentials to access your workspace</div>
+      <div class="field"><label>Username</label><input id="lu" value="admin"></div>
+      <div class="field"><label>Password</label><input id="lp" type="password" value="Admin@12345"></div>
+      <div id="loginErr" class="err"></div>
+      <button class="block" onclick="doLogin()">Login</button>
+      <div style="text-align:right;margin-top:8px"><a href="#" style="font-size:12.5px;color:var(--brand)" onclick="event.preventDefault();openForgot()">Forgot password?</a></div>
+      <div class="demoBox"><b>Demo accounts</b><br>admin / Admin@12345 (Platform Super Admin)<br>hr / HR@12345<br>manager / Manager@12345<br>finance / Finance@12345<br>employee / Employee@12345</div>
+    </div>
+  </div>
+</div>
+
+<div class="loginwrap" id="resetwrap">
+  <div class="loginbrand">
+    <div class="brandmark" style="color:#fff"><div class="logo">BMS</div><div><div class="co" style="color:#fff">Bhartiya Management Solutions</div><div class="sub" style="color:#dbe0ff">Enterprise HRMS</div></div></div>
+    <div><h1>Set a new password.</h1><div class="tag">Choose a strong password to secure your account.</div></div>
+    <div style="font-size:12px;opacity:.75">© 2026 Bhartiya Management Solutions</div>
+  </div>
+  <div class="loginside">
+    <div class="loginbox">
+      <h2>Reset Password</h2>
+      <div class="small">Enter a new password for your account</div>
+      <div class="field"><label>New Password (min 8 chars)</label><input id="rpNew" type="password"></div>
+      <div id="resetErr" class="err"></div>
+      <button class="block" onclick="submitReset()">Set New Password</button>
+      <div style="text-align:right;margin-top:8px"><a href="#" style="font-size:12.5px;color:var(--brand)" onclick="event.preventDefault();location.href=location.pathname">Back to login</a></div>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+<header>
+<div class="brandmark"><div class="logo">BMS</div><div><div class="co" id="hdrCompany">BMS Enterprise HRMS</div><div class="sub" id="hdrSub">Bhartiya Management Solutions</div></div></div>
+<div class="topuser">
+<div class="compswitch" id="compSwitchWrap" style="display:none">
+  <button onclick="toggleCompList()">🏢 <span id="compSwitchLabel">Select company</span> ▾</button>
+  <div class="complist" id="compList"></div>
+</div>
+<div class="avatar" id="avatarTxt">A</div>
+<div class="who"><b id="whoName"></b><span id="whoRole"></span></div>
+<button class="gray sm" onclick="openPwd()">Password</button>
+<button class="red sm" onclick="logout()">Logout</button>
+</div>
+</header>
+<div class="layout">
+<aside><nav id="nav"></nav></aside>
+<main>
+
+<section id="dashboard" class="page active">
+<div class="pagehead"><div><h2 id="dashTitle">Management Dashboard</h2><div class="desc" id="dashDesc">Live overview of your workforce</div></div></div>
+<div id="dashBody"></div>
+</section>
+
+<section id="companies" class="page"><div class="pagehead"><div><h2>Companies</h2><div class="desc">Onboard and manage the companies on this platform</div></div><button onclick="openCompanyModal()">+ Onboard New Company</button></div>
+<div id="compTable" class="tblwrap"></div></section>
+
+<section id="employees" class="page"><div class="pagehead"><div><h2>Employee Master <span class="small" id="empCount"></span></h2><div class="desc">Manage your organization's employee records</div></div><button id="empAddBtn" style="display:none" onclick="showEmpForm()">+ Add Employee</button></div>
+<div id="empForm" class="panel" style="display:none"><h3>Employee details</h3><div class="grid">
+<div class="field"><label>Employee Code</label><input id="ec"></div><div class="field"><label>Name</label><input id="en"></div><div class="field"><label>Email</label><input id="ee"></div>
+<div class="field"><label>Phone</label><input id="ep"></div><div class="field"><label>Department</label><input id="ed"></div><div class="field"><label>Designation</label><input id="eg"></div>
+<div class="field"><label>Manager</label><input id="em"></div><div class="field"><label>Branch</label><input id="eb"></div><div class="field"><label>Joining Date</label><input id="ej" type="date"></div>
+<div class="field"><label>Biometric ID</label><input id="ebi"></div><div class="field"><label>Salary</label><input id="es" type="number"></div><div class="field"><label>Status</label><select id="est"><option>Active</option><option>Inactive</option></select></div>
+<div class="field"><label>Bank Name</label><input id="ebn"></div><div class="field"><label>Bank Account</label><input id="eba"></div><div class="field"><label>IFSC</label><input id="eifsc"></div>
+</div><input type="hidden" id="editEmpId"><div class="actions"><button onclick="saveEmployee()" id="empSaveBtn">Save Employee</button><button class="gray" onclick="resetEmpForm()">Clear</button></div></div>
+<div class="toolbar"><div class="searchbar"><input id="empSearch" placeholder="Search name / code / dept..." oninput="renderEmployees()"></div></div>
+<div id="empTable" class="tblwrap"></div></section>
+
+<section id="attendance" class="page"><div class="pagehead"><h2>Attendance</h2></div><div id="attForm" class="panel"><div class="grid">
+<div class="field" id="aeidWrap"><label>Employee</label><input id="aeid" list="empDL" placeholder="Type name or code"></div>
+<div class="field"><label>Date</label><input id="adate" type="date"></div><div class="field"><label>First In</label><input id="ain" type="datetime-local"></div><div class="field"><label>Last Out</label><input id="aout" type="datetime-local"></div><div class="field"><label>Status</label><select id="ast"><option>Present</option><option>Absent</option><option>Half Day</option><option>Leave</option></select></div></div><button onclick="saveAttendance()">Save Attendance</button></div>
+<div class="searchbar"><input id="attSearch" placeholder="Search employee / date..." oninput="renderAttendance()"></div>
+<div id="attTable" class="tblwrap"></div></section>
+
+<section id="leave" class="page"><div class="pagehead"><h2>Leave Management</h2></div>
+<div id="leaveBalance" class="cards" style="margin-bottom:14px"></div>
+<div class="panel"><div class="grid"><div class="field" id="leidWrap"><label>Employee (HR/Manager)</label><input id="leid" list="empDL" placeholder="Type name or code"></div><div><label>Leave Type</label><select id="let"><option>Casual Leave</option><option>Sick Leave</option><option>Earned Leave</option><option>Unpaid Leave</option></select></div><div><label>Days</label><input id="led" type="number" value="1"></div><div><label>From</label><input id="lef" type="date"></div><div><label>To</label><input id="letd" type="date"></div></div><textarea id="ler" placeholder="Reason"></textarea><button onclick="applyLeave()">Apply Leave</button></div>
+<div class="searchbar"><input id="leaveSearch" placeholder="Search employee / type..." oninput="renderLeaves()"></div>
+<div id="leaveTable" class="tblwrap"></div></section>
+
+<section id="payroll" class="page"><div class="pagehead"><h2>Payroll</h2></div><div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code"></div><div><label>Month</label><input id="pem" type="month"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Deductions</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div></div><button onclick="savePayroll()">Process Payroll</button></div>
+<div class="searchbar"><input id="paySearch" placeholder="Search employee / month..." oninput="renderPayroll()"></div>
+<div id="payTable" class="tblwrap"></div></section>
+
+<section id="recruitment" class="page"><div class="pagehead"><h2>Recruitment / ATS</h2><button id="candAddBtn" style="display:none" onclick="$('candForm').style.display='block'">+ Add Candidate</button></div><div id="candForm" class="panel" style="display:none"><div class="grid"><input id="cn" placeholder="Candidate Name"><input id="ce" placeholder="Email"><input id="cp" placeholder="Phone"><input id="cpos" placeholder="Position"><input id="cdate" type="date"></div><textarea id="cnotes" placeholder="Notes"></textarea><button onclick="addCandidate()">Add Candidate</button></div>
+<div class="searchbar"><input id="candSearch" placeholder="Search name / position..." oninput="renderCandidates()"></div>
+<div id="candTable" class="tblwrap"></div></section>
+
+<section id="onboarding" class="page"><div class="pagehead"><h2>Digital Onboarding</h2></div><div id="onboardTable" class="tblwrap"></div></section>
+<section id="performance" class="page"><div class="pagehead"><h2>Performance / KRA / KPI</h2></div><div class="panel"><div class="grid"><input id="peid" list="empDL" placeholder="Type employee name/code"><input id="pec" placeholder="Review Cycle"><input id="per" type="number" step=".1" placeholder="Rating"></div><textarea id="pegol" placeholder="Goals / KRA / KPI"></textarea><textarea id="pecm" placeholder="Manager comments"></textarea><button onclick="savePerformance()">Save Review</button></div><div id="perfTable" class="tblwrap"></div></section>
+
+<section id="assets" class="page"><div class="pagehead"><h2>Asset Management</h2><button id="assetAddBtn" style="display:none" onclick="$('assetForm').style.display='block'">+ Add Asset</button></div><div id="assetForm" class="panel" style="display:none"><div class="grid"><input id="ac" placeholder="Asset Code"><input id="an" placeholder="Asset Name"><input id="acat" placeholder="Category"><input id="asn" placeholder="Serial No"><input id="ae" list="empDL" placeholder="Assign to Employee (optional)"></div><button onclick="addAsset()">Save Asset</button></div>
+<div class="searchbar"><input id="assetSearch" placeholder="Search asset / employee..." oninput="renderAssets()"></div>
+<div id="assetTable" class="tblwrap"></div></section>
+
+<section id="expenses" class="page"><div class="pagehead"><h2>Expenses / Reimbursement</h2></div><div id="expForm" class="panel"><div class="grid"><div class="field" id="exeiWrap"><label>Employee (HR/Finance/Manager)</label><input id="exei" list="empDL" placeholder="Type name or code"></div><input id="excat" placeholder="Category"><input id="examt" type="number" placeholder="Amount"><input id="exdate" type="date"></div><textarea id="exdesc" placeholder="Description"></textarea><button onclick="addExpense()">Submit Claim</button></div>
+<div class="searchbar"><input id="expSearch" placeholder="Search employee / category..." oninput="renderExpenses()"></div>
+<div id="expenseTable" class="tblwrap"></div></section>
+
+<section id="documents" class="page"><div class="pagehead"><h2>Employee Documents</h2></div><div class="panel"><div class="grid"><div class="field" id="doeiWrap"><label>Employee (HR only)</label><input id="doei" list="empDL" placeholder="Type name or code"></div><input id="don" placeholder="Document Name"><input id="dot" placeholder="Document Type"><input id="dox" type="date" placeholder="Expiry"></div><button onclick="addDocument()">Add Document</button></div><div id="docTable" class="tblwrap"></div></section>
+
+<section id="announcements" class="page"><div class="pagehead"><h2>Company Announcements</h2><button id="annAddBtn" style="display:none" onclick="$('annForm').style.display='block'">+ Publish</button></div><div id="annForm" class="panel" style="display:none"><input id="ant" placeholder="Title"><textarea id="anb" placeholder="Announcement"></textarea><select id="ana"><option>All</option><option>HR</option><option>Managers</option><option>Employees</option></select><button onclick="addAnnouncement()">Publish</button></div>
+<div id="annTable" class="tblwrap"></div></section>
+
+<section id="tickets" class="page"><div class="pagehead"><h2>HR Helpdesk</h2></div><div class="panel"><div class="grid"><div class="field" id="teiWrap"><label>Employee</label><input id="tei" list="empDL" placeholder="Type name or code"></div><input id="tes" placeholder="Subject"><select id="tep"><option>Low</option><option>Medium</option><option>High</option></select></div><textarea id="ted" placeholder="Description"></textarea><button onclick="addTicket()">Create Ticket</button></div>
+<div class="searchbar"><input id="tickSearch" placeholder="Search employee / subject..." oninput="renderTickets()"></div>
+<div id="ticketTable" class="tblwrap"></div></section>
+
+<section id="exits" class="page"><div class="pagehead"><h2>Exit / Separation</h2></div><div class="panel"><div class="grid"><div class="field" id="xeiWrap"><label>Employee</label><input id="xei" list="empDL" placeholder="Type name or code"></div><input id="xrd" type="date"><input id="xlwd" type="date"></div><textarea id="xr" placeholder="Reason"></textarea><button onclick="createExit()">Submit Resignation</button></div><div id="exitTable" class="tblwrap"></div></section>
+
+<section id="biometric" class="page"><div class="pagehead"><h2>Biometric Devices (eSSL / ZKTeco)</h2></div><div class="notice"><b>Sync Now</b> works when this HRMS server is on the same office network as the device — set the Device IP below (from the device's Comm/Network menu) and click Sync Now. <b>If this HRMS is later hosted on the internet</b> (away from the device's LAN), use <b>"Sync Agent Config"</b> on the device row instead — it gives you a config file to run alongside the included <code>sync-agent.js</code> on any PC inside that office, which pushes data to this server over the internet automatically. Either way, each employee's <b>Biometric ID</b> (set on the Employees page) must match the ID/PIN enrolled on the device.</div><div class="panel"><h3 id="bioFormTitle">Register a device</h3><div class="grid"><input id="bn" placeholder="Device Name (e.g. Main Gate)"><input id="bm" placeholder="Model (e.g. X2008)"><input id="bsn" placeholder="Serial Number (optional)"><input id="bb" placeholder="Branch"><input id="bi" placeholder="Device IP e.g. 192.168.1.201"><input id="bp" value="4370" placeholder="Port"></div><input type="hidden" id="editDeviceId"><div class="actions"><button onclick="saveDevice()" id="bioSaveBtn">Add Device</button><button class="gray" onclick="resetDeviceForm()">Clear</button></div></div><div id="bioTable" class="tblwrap"></div></section>
+
+<section id="audit" class="page"><div class="pagehead"><h2>Audit Log</h2></div><div class="searchbar"><input id="auditSearch" placeholder="Search user / action / module..." oninput="renderAudit()"></div><div id="auditTable" class="tblwrap"></div></section>
+<section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
+<div class="panel"><h3>Email Settings</h3><p class="small" id="emailSettingsStatus">Loading...</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Sender Gmail</label><input id="esUser" placeholder="companyhr@gmail.com"></div><div class="field"><label>App Password</label><input id="esPass" type="password" placeholder="16-char app password (leave blank to keep current)"></div></div><button onclick="saveEmailSettings()">Save</button><p class="small" style="margin-top:10px">Used to send announcements, payslips and login emails to this company's employees. Leave both blank to use the platform default sender.</p></div>
+</section>
+</main></div></div>
+
+<datalist id="empDL"></datalist>
+
+<div class="modalbg" id="forgotModal"><div class="modal">
+<h3>Forgot Password</h3>
+<div class="small" style="margin-bottom:12px">Enter your username. If an email is on file, we'll send you a reset link (valid 30 minutes).</div>
+<div class="field"><label>Username</label><input id="fpUser"></div>
+<div id="forgotMsg" class="small"></div>
+<div class="actions"><button onclick="submitForgot()">Send Reset Link</button><button class="gray" onclick="$('forgotModal').classList.remove('show')">Close</button></div>
+</div></div>
+
+<div class="modalbg" id="pwdModal"><div class="modal"><h3>Change Password</h3>
+<div class="field"><label>Current Password</label><input id="pwdCur" type="password"></div>
+<div class="field"><label>New Password (min 8 chars)</label><input id="pwdNew" type="password"></div>
+<div id="pwdErr" class="err"></div>
+<div class="actions"><button onclick="doChangePwd()">Update</button><button class="gray" onclick="$('pwdModal').classList.remove('show')">Cancel</button></div>
+</div></div>
+
+<div class="modalbg" id="compModal"><div class="modal">
+<h3>Onboard New Company</h3>
+<div class="small" style="margin-bottom:14px">This creates the company workspace and its first HR Admin login in one step.</div>
+<div class="field"><label>Company Name</label><input id="cmName" placeholder="e.g. Acme Textiles Pvt Ltd"></div>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="field"><label>Short Code</label><input id="cmCode" placeholder="e.g. ACME"></div>
+<div class="field"><label>Industry</label><input id="cmIndustry" placeholder="e.g. Manufacturing"></div>
+</div>
+<div class="field"><label>Address</label><input id="cmAddress" placeholder="Registered office address"></div>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="field"><label>Contact Email</label><input id="cmEmail" placeholder="hr@company.com"></div>
+<div class="field"><label>Contact Phone</label><input id="cmPhone" placeholder="98xxxxxxxx"></div>
+</div>
+<div class="small" style="margin:14px 0 8px;font-weight:700;color:#334155">First HR Admin login for this company</div>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="field"><label>Admin Username</label><input id="cmAdminUser" placeholder="e.g. acme_hr"></div>
+<div class="field"><label>Admin Password</label><input id="cmAdminPass" type="password" placeholder="min 8 characters"></div>
+</div>
+<div class="small" style="margin:14px 0 8px;font-weight:700;color:#334155">Email sender (optional)</div>
+<div class="small" style="margin-bottom:8px">This company's own Gmail, used to send announcements, payslips and login emails to its employees. Leave blank to use the platform default.</div>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="field"><label>Sender Gmail</label><input id="cmSmtpUser" placeholder="companyhr@gmail.com"></div>
+<div class="field"><label>App Password</label><input id="cmSmtpPass" type="password" placeholder="16-char app password"></div>
+</div>
+<div id="compErr" class="err"></div>
+<div class="actions"><button onclick="submitCompany()">Onboard Company</button><button class="gray" onclick="$('compModal').classList.remove('show')">Cancel</button></div>
+</div></div>
+
+<div class="modalbg" id="agentCfgModal"><div class="modal" style="max-width:520px">
+<h3>Sync Agent Config</h3>
+<div class="small" style="margin-bottom:10px">If this HRMS is hosted away from the device's office network (e.g. on the internet later), run the included <code>sync-agent.js</code> on any always-on PC inside that office's LAN. Save the JSON below as <code>sync-agent.config.json</code> next to it, then run <code>node sync-agent.js</code>. It will keep pushing attendance to this server automatically — change <code>server_url</code> to your live domain once hosted.</div>
+<pre id="agentCfgText" style="background:#0f172a;color:#dbeafe;padding:14px;border-radius:8px;font-size:12px;overflow:auto;max-height:260px"></pre>
+<div class="actions"><button onclick="copyAgentConfig()">Copy Config</button><button class="gray" onclick="$('agentCfgModal').classList.remove('show')">Close</button></div>
+</div></div>
+
+<div id="payslipPrint"></div>
+
+<script>
+let ME=null,COMPANY=null,COMPANIES_CACHE=[];
+let EMP=[];
+const PAGEDATA={};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+async function api(url,opt={}){const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(r.status===401){showLogin();throw Error("Login required")}if(!r.ok)throw Error(d.error||"Request failed");return d}
+function showLogin(){$("app").classList.remove("show");if(RESET_TOKEN){$("resetwrap").classList.add("show");return}$("loginwrap").classList.add("show")}
+function openForgot(){$("fpUser").value="";$("forgotMsg").textContent="";$("forgotModal").classList.add("show")}
+async function submitForgot(){
+  try{await api("/api/forgot-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("fpUser").value})});
+  $("forgotMsg").textContent="If that account has an email on file, a reset link has been sent.";}
+  catch(e){$("forgotMsg").textContent=e.message}
+}
+let RESET_TOKEN=null;
+async function submitReset(){
+  const np=$("rpNew").value;
+  try{await api("/api/reset-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:RESET_TOKEN,new_password:np})});
+    alert("Password updated. Please log in.");location.href=location.pathname;
+  }catch(e){$("resetErr").textContent=e.message}
+}
+(function checkResetLink(){
+  const m=location.search.match(/[?&]reset=([^&]+)/);
+  if(m){RESET_TOKEN=decodeURIComponent(m[1]);$("resetwrap").classList.add("show")}
+})();
+async function doLogin(){try{const d=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("lu").value,password:$("lp").value})});ME=d.user;boot()}catch(e){$("loginErr").textContent=e.message}}
+async function logout(){await fetch("/api/logout",{method:"POST"});location.reload()}
+function isHR(){return ["Super Admin","HR Admin"].includes(ME.role)}
+function isMgrPlus(){return ["Super Admin","HR Admin","Manager"].includes(ME.role)}
+function isFinancePlus(){return ["Super Admin","HR Admin","Finance"].includes(ME.role)}
+function isPlatformSA(){return ME.role==="Super Admin" && !COMPANY}
+
+function empLabel(e){return `${e.employee_code} - ${e.name}`}
+function fillEmpDatalist(){$("empDL").innerHTML=EMP.map(e=>`<option value="${esc(empLabel(e))}">`).join("")}
+function resolveEmp(inputId){
+  const v=(($(inputId)&&$(inputId).value)||"").trim().toLowerCase();
+  if(!v)return null;
+  let m=EMP.find(e=>empLabel(e).toLowerCase()===v);
+  if(!m)m=EMP.find(e=>String(e.employee_code).toLowerCase()===v);
+  if(!m)m=EMP.find(e=>empLabel(e).toLowerCase().includes(v));
+  return m?m.id:null;
+}
+
+const ICONS={
+ dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+ companies:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V7l9-4 9 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 9h.01M15 9h.01M9 13h.01M15 13h.01"/></svg>',
+ employees:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c1-4 3.4-6 6.5-6s5.5 2 6.5 6"/><circle cx="17.5" cy="8.5" r="2.4"/><path d="M15.5 14.2c2.3.3 4 2 4.8 5.3"/></svg>',
+ attendance:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 3.2"/></svg>',
+ leave:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v3M16 3v3"/><path d="M8.5 14l2.2 2.2L15.5 12"/></svg>',
+ payroll:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><path d="M2.5 10h19M6 14.5h4"/></svg>',
+ recruitment:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+ onboarding:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l4-4m-4 4l-4-4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>',
+ performance:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V10M10 21V3M17 21v-7"/></svg>',
+ assets:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+ expenses:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9M9.3 15c.4 1 1.4 1.6 2.7 1.6 1.7 0 2.8-.8 2.8-2s-1-1.7-2.8-2c-1.7-.3-2.7-.9-2.7-2s1.1-2 2.7-2c1.3 0 2.3.5 2.7 1.5"/></svg>',
+ documents:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M9.5 13h5M9.5 16.5h5"/></svg>',
+ announcements:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10v4h3l5 4V6L7 10H4Z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>',
+ tickets:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4Z"/></svg>',
+ exits:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>',
+ biometric:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7a3 3 0 0 0-3 3c0 3.5-1 6-2 7M12 7a3 3 0 0 1 3 3c0 1 .1 3-1 5M9.5 17c1-1.3 1.5-2.7 1.5-5a1 1 0 1 1 2 0c0 3-1 5.5-2 7"/></svg>',
+ audit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h9a2 2 0 0 1 2 2v13l-4-2-4 2V5a2 2 0 0 1 2-2Z"/><path d="M5 8v11a2 2 0 0 0 2 2h9"/></svg>',
+ settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.6 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.6 1Z"/></svg>'
+};
+
+function navBuild(){
+ const r=ME.role;
+ const sections=[];
+ if(r==="Super Admin")sections.push({t:"Platform",items:[["companies","Companies",true]]});
+ sections.push({t:"Overview",items:[["dashboard","Dashboard",true]]});
+ sections.push({t:"Organization",items:[["employees","Employees",true]]});
+ sections.push({t:"Time & Leave",items:[["attendance","Attendance",true],["leave","Leave",true]]});
+ sections.push({t:"Payroll & Finance",items:[["payroll","Payroll",["Super Admin","HR Admin","Finance","Manager"].includes(r)],["expenses","Expenses",true]]});
+ sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin"].includes(r)],["performance","Performance",true]]});
+ sections.push({t:"Assets & Docs",items:[["assets","Assets",["Super Admin","HR Admin"].includes(r)],["documents","Documents",true]]});
+ sections.push({t:"Engagement",items:[["announcements","Announcements",true],["tickets","HR Helpdesk",true],["exits","Exit / Separation",true]]});
+ sections.push({t:"Administration",items:[["biometric","Biometric / eSSL",["Super Admin","HR Admin"].includes(r)],["audit","Audit Log",["Super Admin","HR Admin"].includes(r)],["settings","HR Policies",["Super Admin","HR Admin"].includes(r)]]});
+ $("nav").innerHTML=sections.map(s=>{
+   const items=s.items.filter(x=>x[2]);
+   if(!items.length)return "";
+   return `<div class="navgroup"><div class="gt">${s.t}</div>${items.map(x=>`<button class="item" id="nav_${x[0]}" onclick="page('${x[0]}')"><span class="ic">${ICONS[x[0]]||""}</span>${x[1]}</button>`).join("")}</div>`;
+ }).join("");
+ $("whoName").textContent=ME.username;
+ $("whoRole").textContent=ME.role;
+ $("avatarTxt").textContent=ME.username.slice(0,2).toUpperCase();
+}
+function page(id){document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));document.querySelectorAll("nav button").forEach(x=>x.classList.remove("sel"));$(id).classList.add("active");const n=$("nav_"+id);if(n)n.classList.add("sel");loadPage(id)}
+
+async function loadEmployeesCache(){
+  if(!COMPANY){EMP=[];fillEmpDatalist();return}
+  try{EMP=await api("/api/employees");fillEmpDatalist()}catch(e){EMP=[]}
+}
+
+function applyRoleVisibility(){
+  const showIfMgr=id=>{if($(id))$(id).style.display=isMgrPlus()?"":"none"};
+  showIfMgr("aeidWrap");showIfMgr("leidWrap");showIfMgr("exeiWrap");showIfMgr("teiWrap");showIfMgr("xeiWrap");
+  if($("doeiWrap"))$("doeiWrap").style.display=isHR()?"":"none";
+  if($("empAddBtn"))$("empAddBtn").style.display=isHR()?"":"none";
+  if($("candAddBtn"))$("candAddBtn").style.display=isHR()?"":"none";
+  if($("assetAddBtn"))$("assetAddBtn").style.display=isHR()?"":"none";
+  if($("annAddBtn"))$("annAddBtn").style.display=isHR()?"":"none";
+  if($("payForm"))$("payForm").style.display=isFinancePlus()?"":"none";
+}
+
+async function refreshMe(){
+  const d=await api("/api/me");ME={...d.user};COMPANY=d.company||null;
+  $("hdrCompany").textContent=COMPANY?COMPANY.name:"BMS Enterprise HRMS";
+  $("hdrSub").textContent=COMPANY?(COMPANY.industry||"Company workspace"):"Platform administration";
+  if(ME.role==="Super Admin"){
+    $("compSwitchWrap").style.display="block";
+    $("compSwitchLabel").textContent=COMPANY?COMPANY.name:"Platform view";
+  }else{$("compSwitchWrap").style.display="none"}
+}
+
+async function boot(){
+  $("loginwrap").classList.remove("show");$("app").classList.add("show");
+  await refreshMe();
+  navBuild();await loadEmployeesCache();applyRoleVisibility();
+  if(ME.role==="Super Admin")await loadCompaniesCache();
+  page(ME.role==="Super Admin" && !COMPANY ? "dashboard" : "dashboard");
+}
+
+async function loadCompaniesCache(){
+  try{COMPANIES_CACHE=await api("/api/companies")}catch(e){COMPANIES_CACHE=[]}
+  $("compList").innerHTML=`<div class="opt ${!COMPANY?'sel':''}" onclick="switchCompany(null)">Platform view (all companies)</div>`+
+    COMPANIES_CACHE.map(c=>`<div class="opt ${COMPANY&&COMPANY.id===c.id?'sel':''}" onclick="switchCompany(${c.id})">${esc(c.name)}<span class="small">${c.employee_count} emp</span></div>`).join("");
+}
+function toggleCompList(){$("compList").classList.toggle("show")}
+document.addEventListener("click",e=>{if(!e.target.closest(".compswitch"))$("compList")?.classList.remove("show")});
+async function switchCompany(id){
+  try{
+    await api("/api/switch-company",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company_id:id})});
+    await refreshMe();navBuild();await loadEmployeesCache();applyRoleVisibility();await loadCompaniesCache();
+    $("compList").classList.remove("show");
+    page("dashboard");
+  }catch(e){alert(e.message)}
+}
+
+async function loadDashboard(){
+  const d=await api("/api/dashboard");
+  if(d.platform){
+    $("dashTitle").textContent="Platform Overview";
+    $("dashDesc").textContent="Aggregate view across all onboarded companies";
+    $("dashBody").innerHTML=`<div class="cards">
+      <div class="card"><div class="bar"></div><div class="lbl">Companies Onboarded</div><div class="num">${d.companies}</div></div>
+      <div class="card"><div class="bar"></div><div class="lbl">Active Companies</div><div class="num">${d.activeCompanies}</div></div>
+      <div class="card"><div class="bar"></div><div class="lbl">Total Active Employees</div><div class="num">${d.employees}</div></div>
+      <div class="card"><div class="bar"></div><div class="lbl">Open Support Tickets</div><div class="num">${d.tickets}</div></div>
+    </div>
+    <div class="panel"><h3>Getting started</h3><p class="small">Go to <b>Companies</b> to onboard a new company workspace. Each company gets its own isolated employees, attendance, payroll, leave policy and more. Use the company switcher in the header to enter a company's workspace and manage it directly.</p></div>`;
+    return;
+  }
+  $("dashTitle").textContent="Management Dashboard";
+  $("dashDesc").textContent=COMPANY?`Live overview — ${COMPANY.name}`:"Live overview of your workforce";
+  const trend=d.attendanceTrend||[];
+  const max=Math.max(1,...trend.map(t=>t.c));
+  $("dashBody").innerHTML=`<div class="cards">
+  <div class="card"><div class="bar"></div><div class="lbl">Active Employees</div><div class="num">${d.employees}</div></div>
+  <div class="card"><div class="bar"></div><div class="lbl">Today's Present</div><div class="num">${d.present}</div></div>
+  <div class="card"><div class="bar"></div><div class="lbl">On Leave</div><div class="num">${d.onLeave}</div></div>
+  <div class="card"><div class="bar"></div><div class="lbl">Payroll Net (This Month)</div><div class="num">₹${Number(d.payroll||0).toLocaleString("en-IN")}</div></div>
+  </div>
+  <div class="cards" style="margin-top:14px">
+  <div class="card"><div class="bar"></div><div class="lbl">Open Candidates</div><div class="num">${d.candidates}</div></div>
+  <div class="card"><div class="bar"></div><div class="lbl">Biometric Devices</div><div class="num">${d.devices}</div></div>
+  <div class="card"><div class="bar"></div><div class="lbl">Open Tickets</div><div class="num">${d.tickets}</div></div>
+  </div>
+  <div class="panel"><h3>Attendance — last 7 days</h3><div class="trend">${trend.map(t=>`<div style="flex:1;text-align:center"><div class="b" style="height:${Math.max(4,t.c/max*60)}px"></div><div class="lb">${t.work_date.slice(5)}</div></div>`).join("")||'<div class="small">No attendance recorded yet</div>'}</div></div>`;
+}
+
+function table(target,heads,rows){$(target).innerHTML=`<table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${heads.length}"><div class="emptystate">No records yet</div></td></tr>`}</tbody></table>`}
+function statusBadge(s){const cls=/approved|active|closed|complete|done|joined|processed/i.test(s)?"ok":/rejected|inactive|absent/i.test(s)?"bad":"warn";return `<span class="badge ${cls}">${esc(s)}</span>`}
+function filterRows(rows,fields,q){if(!q)return rows;q=q.toLowerCase();return rows.filter(r=>fields.some(f=>String(r[f]??"").toLowerCase().includes(q)))}
+
+function needsCompany(target){
+  if(!COMPANY){$(target).innerHTML=`<div class="emptystate">Select a company from the header switcher to view this module.</div>`;return true}
+  return false;
+}
+
+async function loadPage(id){
+ try{
+  if(id==="dashboard")return loadDashboard();
+  if(id==="companies"){PAGEDATA.companies=await api("/api/companies");renderCompanies();return}
+  if(isPlatformSA() && !["dashboard","companies"].includes(id)){
+    $(id+"Table")&&(($(id+"Table").innerHTML=`<div class="emptystate">Select a company from the header switcher to manage this module.</div>`));
+    return;
+  }
+  if(id==="employees"){PAGEDATA.employees=await api("/api/employees");EMP=PAGEDATA.employees;fillEmpDatalist();renderEmployees();}
+  if(id==="attendance"){PAGEDATA.attendance=await api("/api/attendance");renderAttendance();}
+  if(id==="leave"){PAGEDATA.leave=await api("/api/leaves");renderLeaves();loadLeaveBalance();}
+  if(id==="payroll"){PAGEDATA.payroll=await api("/api/payroll");renderPayroll();}
+  if(id==="recruitment"){PAGEDATA.recruitment=await api("/api/candidates");renderCandidates();}
+  if(id==="onboarding"){let x=await api("/api/onboarding");table("onboardTable",["Employee","Offer","Documents","Verification","Assets","Policy","Complete",isHR()?"Action":""],x.map(a=>[a.employee_code+" - "+a.name,statusBadge(a.offer?"Done":"Pending"),statusBadge(a.documents?"Done":"Pending"),statusBadge(a.verification?"Done":"Pending"),statusBadge(a.assets?"Done":"Pending"),statusBadge(a.policy?"Done":"Pending"),statusBadge(a.completed?"Done":"Pending"),isHR()?onboardActions(a):""]));}
+  if(id==="performance"){PAGEDATA.performance=await api("/api/performance");table("perfTable",["Employee","Cycle","Goals","Rating","Status"],PAGEDATA.performance.map(a=>[a.employee_code+" - "+a.name,esc(a.cycle),esc(a.goals),a.rating,statusBadge(a.status)]));}
+  if(id==="assets"){PAGEDATA.assets=await api("/api/assets");renderAssets();}
+  if(id==="expenses"){PAGEDATA.expenses=await api("/api/expenses");renderExpenses();}
+  if(id==="documents"){let x=await api("/api/documents");table("docTable",["Employee","Document","Type","Expiry","Status"],x.map(a=>[a.employee_code+" - "+a.employee_name,esc(a.name),esc(a.doc_type),a.expiry_date,statusBadge(a.status)]));}
+  if(id==="announcements"){PAGEDATA.announcements=await api("/api/announcements");table("annTable",["Title","Body","Audience","Created"],PAGEDATA.announcements.map(a=>[esc(a.title),esc(a.body),a.audience,a.created_at]));}
+  if(id==="tickets"){PAGEDATA.tickets=await api("/api/tickets");renderTickets();}
+  if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();}
+  if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);}
+  if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
+  if(id==="settings"){loadEmailSettings();}
+ }catch(e){console.error(e)}
+}
+
+/* ---------- Companies ---------- */
+function openCompanyModal(){["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
+async function submitCompany(){
+  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
+  try{await api("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("compModal").classList.remove("show");alert("Company onboarded. Share the HR Admin username/password with them to get started.");loadPage("companies");loadCompaniesCache();}
+  catch(e){$("compErr").textContent=e.message}
+}
+async function companyStatus(id,status){try{await api(`/api/companies/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("companies");loadCompaniesCache();}catch(e){alert(e.message)}}
+function renderCompanies(){
+  const rows=PAGEDATA.companies||[];
+  table("compTable",["Company","Code","Industry","Employees","Status","Onboarded","Action"],rows.map(c=>[esc(c.name),`<span class="chip">${esc(c.code)}</span>`,esc(c.industry||"-"),c.employee_count,statusBadge(c.status),c.created_at,
+    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">Manage</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+}
+
+/* ---------- Employees ---------- */
+function showEmpForm(){resetEmpForm();$("empForm").style.display="block"}
+function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","eb","ej","ebi","es","ebn","eba","eifsc"].forEach(id=>$(id).value="");$("est").value="Active";$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee"}
+function editEmployee(id){
+  const e=EMP.find(x=>x.id===id);if(!e)return;
+  $("ec").value=e.employee_code||"";$("en").value=e.name||"";$("ee").value=e.email||"";$("ep").value=e.phone||"";
+  $("ed").value=e.department||"";$("eg").value=e.designation||"";$("em").value=e.manager||"";$("eb").value=e.branch||"";
+  $("ej").value=e.joining_date||"";$("ebi").value=e.biometric_id||"";$("es").value=e.salary||0;$("est").value=e.status||"Active";
+  $("ebn").value=e.bank_name||"";$("eba").value=e.bank_account||"";$("eifsc").value=e.ifsc||"";
+  $("editEmpId").value=e.id;$("empSaveBtn").textContent="Update Employee";
+  $("empForm").style.display="block";$("empForm").scrollIntoView({behavior:"smooth"});
+}
+async function saveEmployee(){
+  const body={employee_code:$("ec").value,name:$("en").value,email:$("ee").value,phone:$("ep").value,department:$("ed").value,designation:$("eg").value,manager:$("em").value,branch:$("eb").value,joining_date:$("ej").value,biometric_id:$("ebi").value,salary:$("es").value,status:$("est").value,bank_name:$("ebn").value,bank_account:$("eba").value,ifsc:$("eifsc").value};
+  const editId=$("editEmpId").value;
+  try{
+    if(editId)await api("/api/employees/"+editId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    else await api("/api/employees",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    alert(editId?"Employee updated":"Employee saved");$("empForm").style.display="none";resetEmpForm();loadPage("employees");
+  }catch(e){alert(e.message)}
+}
+async function toggleEmpStatus(id,cur){
+  const ns=cur==="Active"?"Inactive":"Active";
+  if(!confirm(`Mark employee as ${ns}?`))return;
+  try{await api("/api/employees/"+id+"/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:ns})});loadPage("employees")}catch(e){alert(e.message)}
+}
+async function createLogin(id){
+  if(!confirm("Create a self-service login for this employee? A temporary password will be generated and emailed to them (if they have an email on file)."))return;
+  try{
+    const r=await api(`/api/employees/${id}/create-login`,{method:"POST"});
+    alert(r.emailed?`Login created and emailed to the employee.\nUsername: ${r.username}`:`Login created.\nUsername: ${r.username}\nTemporary Password: ${r.temp_password}\n(No email on file — share these credentials manually.)`);
+  }catch(e){alert(e.message)}
+}
+function renderEmployees(){
+  if(needsCompany("empTable"))return;
+  const q=$("empSearch").value;
+  const rows=filterRows(PAGEDATA.employees||[],["employee_code","name","department","designation","branch"],q);
+  $("empCount").textContent=`(${rows.length} of ${(PAGEDATA.employees||[]).length})`;
+  table("empTable",["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),esc(e.name),esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),statusBadge(e.status),
+    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button></div>`:""]));
+}
+
+/* ---------- Attendance ---------- */
+async function saveAttendance(){
+  const eid=isMgrPlus()?resolveEmp("aeid"):ME.employee_id;
+  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  try{await api("/api/attendance/manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,work_date:$("adate").value,first_in:$("ain").value,last_out:$("aout").value,status:$("ast").value})});alert("Attendance saved");$("aeid").value="";loadPage("attendance")}catch(e){alert(e.message)}
+}
+function renderAttendance(){
+  if(needsCompany("attTable"))return;
+  const q=$("attSearch").value;
+  const rows=filterRows((PAGEDATA.attendance||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","work_date","department"],q);
+  table("attTable",["Date","Employee","Dept","First In","Last Out","Status","Source"],rows.map(a=>[a.work_date,esc(a.employee_code+" - "+a.name),esc(a.department),a.first_in||"-",a.last_out||"-",statusBadge(a.status),a.source]));
+}
+
+/* ---------- Leave ---------- */
+async function loadLeaveBalance(){
+  if(!COMPANY)return;
+  const eid=isMgrPlus()?null:ME.employee_id;
+  if(!eid && isMgrPlus()){$("leaveBalance").innerHTML=`<div class="small">Select an employee above to view balance after applying, or check Employees page.</div>`;return}
+  try{
+    const b=await api("/api/leaves/balance");
+    $("leaveBalance").innerHTML=b.map(x=>`<div class="card"><div class="bar"></div><div class="lbl">${esc(x.leave_type)}</div><div class="num">${x.remaining}</div><div class="small">of ${x.annual_balance} (used ${x.used})</div></div>`).join("");
+  }catch(e){}
+}
+async function applyLeave(){
+  const eid=isMgrPlus()?resolveEmp("leid"):ME.employee_id;
+  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  try{await api("/api/leaves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type:$("let").value,days:$("led").value,from_date:$("lef").value,to_date:$("letd").value,reason:$("ler").value})});alert("Leave submitted");$("leid").value="";loadPage("leave")}catch(e){alert(e.message)}
+}
+async function leaveStatus(id,status){
+  try{await api(`/api/leaves/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("leave")}catch(e){alert(e.message)}
+}
+function renderLeaves(){
+  if(needsCompany("leaveTable"))return;
+  const q=$("leaveSearch").value;
+  const rows=filterRows((PAGEDATA.leave||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","leave_type"],q);
+  table("leaveTable",["Employee","Type","From","To","Days","Status","Approved By","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.name),a.leave_type,a.from_date,a.to_date,a.days,statusBadge(a.status),a.approved_by||"-",
+    (isMgrPlus() && a.status==="Pending")?`<div class="actions"><button class="sm green" onclick="leaveStatus(${a.id},'Approved')">Approve</button><button class="sm red" onclick="leaveStatus(${a.id},'Rejected')">Reject</button></div>`:""]));
+}
+
+/* ---------- Payroll ---------- */
+async function savePayroll(){
+  const eid=resolveEmp("pei");if(!eid)return alert("Select a valid employee");
+  try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,ot:$("peo").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
+}
+function printPayslip(row){
+  $("payslipPrint").innerHTML=`<h2>${esc(COMPANY?COMPANY.name:"Company")}</h2><div>Payslip — ${esc(row.month)}</div>
+  <table><tr><th>Employee</th><td>${esc(row.employee_code)} - ${esc(row.name)}</td></tr>
+  <tr><th>Payslip No</th><td>${esc(row.payslip_no)}</td></tr>
+  <tr><th>Gross</th><td>₹${Number(row.gross).toLocaleString("en-IN")}</td></tr>
+  <tr><th>Deductions</th><td>₹${Number(row.deductions).toLocaleString("en-IN")}</td></tr>
+  <tr><th>LOP</th><td>₹${Number(row.lop).toLocaleString("en-IN")}</td></tr>
+  <tr><th>Overtime</th><td>₹${Number(row.ot).toLocaleString("en-IN")}</td></tr>
+  <tr><th>Net Pay</th><td><b>₹${Number(row.net).toLocaleString("en-IN")}</b></td></tr>
+  <tr><th>Status</th><td>${esc(row.status)}</td></tr></table>`;
+  document.body.classList.add("printing");
+  window.print();
+  document.body.classList.remove("printing");
+}
+function renderPayroll(){
+  if(needsCompany("payTable"))return;
+  const q=$("paySearch").value;
+  const rows=filterRows((PAGEDATA.payroll||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","month"],q);
+  window.__payrows=rows;
+  table("payTable",["Employee","Month","Gross","Deduction","LOP","OT","Net","Status","Payslip","Action"],rows.map((a,i)=>[esc(a.employee_code+" - "+a.name),a.month,a.gross,a.deductions,a.lop,a.ot,"₹"+Number(a.net).toLocaleString("en-IN"),statusBadge(a.status),a.payslip_no,`<button class="sm outline" onclick='printPayslip(window.__payrows[${i}])'>Print</button>`]));
+}
+
+/* ---------- Recruitment ---------- */
+async function addCandidate(){
+  try{await api("/api/candidates",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("cn").value,email:$("ce").value,phone:$("cp").value,position:$("cpos").value,interview_date:$("cdate").value,notes:$("cnotes").value})});alert("Candidate added");$("candForm").style.display="none";loadPage("recruitment")}catch(e){alert(e.message)}
+}
+async function candStatus(id,status){try{await api(`/api/candidates/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("recruitment")}catch(e){alert(e.message)}}
+function renderCandidates(){
+  if(needsCompany("candTable"))return;
+  const q=$("candSearch").value;
+  const rows=filterRows(PAGEDATA.recruitment||[],["name","position","email"],q);
+  const stages=["Applied","Interview","Offered","Joined","Rejected"];
+  table("candTable",["Name","Email","Phone","Position","Status","Interview","Action"],rows.map(a=>[esc(a.name),esc(a.email),esc(a.phone),esc(a.position),statusBadge(a.status),a.interview_date||"-",
+    isMgrPlus()?`<select onchange="candStatus(${a.id},this.value)">${stages.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select>`:""]));
+}
+
+/* ---------- Onboarding ---------- */
+function onboardActions(a){
+  return `<div class="actions"><button class="sm outline" onclick="markOnboard(${a.id},${JSON.stringify({offer:a.offer,documents:a.documents,verification:a.verification,assets:a.assets,policy:a.policy,completed:1}).replace(/"/g,'&quot;')})">Mark Complete</button></div>`;
+}
+async function markOnboard(id,payload){try{await api("/api/onboarding/"+id,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});loadPage("onboarding")}catch(e){alert(e.message)}}
+
+/* ---------- Performance ---------- */
+async function savePerformance(){
+  const eid=resolveEmp("peid");if(!eid)return alert("Select a valid employee");
+  try{await api("/api/performance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,cycle:$("pec").value,rating:$("per").value,goals:$("pegol").value,manager_comments:$("pecm").value})});alert("Review saved");$("peid").value="";loadPage("performance")}catch(e){alert(e.message)}
+}
+
+/* ---------- Assets ---------- */
+async function addAsset(){
+  const eid=$("ae").value?resolveEmp("ae"):null;
+  try{await api("/api/assets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({asset_code:$("ac").value,name:$("an").value,category:$("acat").value,serial_no:$("asn").value,employee_id:eid})});alert("Asset saved");$("assetForm").style.display="none";loadPage("assets")}catch(e){alert(e.message)}
+}
+function renderAssets(){
+  if(needsCompany("assetTable"))return;
+  const q=$("assetSearch").value;
+  const rows=filterRows(PAGEDATA.assets||[],["asset_code","name","category","employee_name"],q);
+  table("assetTable",["Code","Asset","Category","Serial","Status","Employee"],rows.map(a=>[esc(a.asset_code),esc(a.name),esc(a.category),esc(a.serial_no),statusBadge(a.status),esc(a.employee_name||"-")]));
+}
+
+/* ---------- Expenses ---------- */
+async function addExpense(){
+  const eid=isMgrPlus()?resolveEmp("exei"):ME.employee_id;
+  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  try{await api("/api/expenses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,category:$("excat").value,amount:$("examt").value,expense_date:$("exdate").value,description:$("exdesc").value})});alert("Claim submitted");$("exei").value="";loadPage("expenses")}catch(e){alert(e.message)}
+}
+async function expenseStatus(id,status){try{await api(`/api/expenses/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("expenses")}catch(e){alert(e.message)}}
+function renderExpenses(){
+  if(needsCompany("expenseTable"))return;
+  const q=$("expSearch").value;
+  const rows=filterRows((PAGEDATA.expenses||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.employee_name})),["emplbl","category"],q);
+  table("expenseTable",["Employee","Category","Amount","Date","Description","Status","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.employee_name),esc(a.category),"₹"+Number(a.amount).toLocaleString("en-IN"),a.expense_date,esc(a.description),statusBadge(a.status),
+    (isFinancePlus()||ME.role==="Manager")&&a.status==="Pending"?`<div class="actions"><button class="sm green" onclick="expenseStatus(${a.id},'Approved')">Approve</button><button class="sm red" onclick="expenseStatus(${a.id},'Rejected')">Reject</button></div>`:""]));
+}
+
+/* ---------- Documents ---------- */
+async function addDocument(){
+  const eid=isHR()?resolveEmp("doei"):ME.employee_id;
+  if(isHR() && !eid)return alert("Select a valid employee");
+  try{await api("/api/documents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,name:$("don").value,doc_type:$("dot").value,expiry_date:$("dox").value})});alert("Document record added");$("doei").value="";loadPage("documents")}catch(e){alert(e.message)}
+}
+
+/* ---------- Announcements ---------- */
+async function addAnnouncement(){try{await api("/api/announcements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:$("ant").value,body:$("anb").value,audience:$("ana").value})});alert("Announcement published");$("annForm").style.display="none";loadPage("announcements")}catch(e){alert(e.message)}}
+
+/* ---------- Tickets ---------- */
+async function addTicket(){
+  const eid=isMgrPlus()?resolveEmp("tei"):ME.employee_id;
+  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  try{await api("/api/tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,subject:$("tes").value,priority:$("tep").value,description:$("ted").value})});alert("Ticket created");$("tei").value="";loadPage("tickets")}catch(e){alert(e.message)}
+}
+async function ticketStatus(id,status){try{await api(`/api/tickets/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("tickets")}catch(e){alert(e.message)}}
+function renderTickets(){
+  if(needsCompany("ticketTable"))return;
+  const q=$("tickSearch").value;
+  const rows=filterRows((PAGEDATA.tickets||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.employee_name})),["emplbl","subject"],q);
+  const stages=["Open","In Progress","Closed"];
+  table("ticketTable",["Employee","Subject","Priority","Status","Assigned","Created","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.employee_name),esc(a.subject),a.priority,statusBadge(a.status),a.assigned_to||"-",a.created_at,
+    isMgrPlus()?`<select onchange="ticketStatus(${a.id},this.value)">${stages.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select>`:""]));
+}
+
+/* ---------- Exits ---------- */
+async function createExit(){
+  const eid=isHR()?resolveEmp("xei"):ME.employee_id;
+  if(isHR() && !eid)return alert("Select a valid employee");
+  try{await api("/api/exits",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,resignation_date:$("xrd").value,last_working_date:$("xlwd").value,reason:$("xr").value})});alert("Exit request submitted");$("xei").value="";loadPage("exits")}catch(e){alert(e.message)}
+}
+async function exitAction(id,field,value){try{await api(`/api/exits/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({[field]:value})});loadPage("exits")}catch(e){alert(e.message)}}
+function renderExits(){
+  if(needsCompany("exitTable"))return;
+  const rows=PAGEDATA.exits||[];
+  const st=["Pending","Approved","Rejected"],cl=["Pending","Completed"],fnf=["Pending","Processed"];
+  table("exitTable",["Employee","Resignation","Last Working","Reason","Status","Clearance","F&F"],rows.map(a=>[esc(a.employee_code+" - "+a.employee_name),a.resignation_date,a.last_working_date,esc(a.reason),
+    isHR()?`<select onchange="exitAction(${a.id},'status',this.value)">${st.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select>`:statusBadge(a.status),
+    isHR()?`<select onchange="exitAction(${a.id},'clearance',this.value)">${cl.map(s=>`<option ${s===a.clearance?"selected":""}>${s}</option>`).join("")}</select>`:statusBadge(a.clearance),
+    isHR()?`<select onchange="exitAction(${a.id},'fnf_status',this.value)">${fnf.map(s=>`<option ${s===a.fnf_status?"selected":""}>${s}</option>`).join("")}</select>`:statusBadge(a.fnf_status)]));
+}
+
+/* ---------- Biometric ---------- */
+let BIO_CACHE=[];
+function renderBiometric(rows){
+  BIO_CACHE=rows;
+  table("bioTable",["Name","Model","Serial No","Branch","IP : Port","Status","Last Sync","Action"],rows.map(a=>[esc(a.name),esc(a.model),esc(a.serial_no||"-"),esc(a.branch),`${esc(a.ip||"-")} : ${a.port}`,
+    statusBadge(a.status)+(a.last_error?`<div class="small" style="color:#b91c1c;margin-top:3px">${esc(a.last_error)}</div>`:""),
+    a.last_sync?new Date(a.last_sync).toLocaleString("en-IN"):"Never",
+    `<div class="actions"><button class="sm outline" onclick="syncDevice(${a.id},this)">Sync Now</button><button class="sm gray" onclick="editDevice(${a.id})">Edit</button><button class="sm gray" onclick="showAgentConfig(${a.id})">Sync Agent Config</button><button class="sm gray" onclick="rotateDeviceKey(${a.id})">Rotate Key</button></div>`]));
+}
+function showAgentConfig(id){
+  const d=BIO_CACHE.find(x=>x.id===id);if(!d)return;
+  if(!d.api_key){alert("No API key on this device yet. Rotate the key first.");return}
+  const cfg={device_ip:d.ip,device_port:d.port,server_url:location.origin,device_id:d.id,api_key:d.api_key,sync_interval_minutes:5,lookback_days:4};
+  const txt=JSON.stringify(cfg,null,2);
+  $("agentCfgText").textContent=txt;
+  $("agentCfgModal").classList.add("show");
+}
+function copyAgentConfig(){
+  navigator.clipboard?.writeText($("agentCfgText").textContent).then(()=>alert("Copied. Save this as sync-agent.config.json on the office PC running the agent."));
+}
+async function rotateDeviceKey(id){
+  if(!confirm("Rotate this device's API key? The old key (and any running sync agent using it) will stop working until updated."))return;
+  try{await api(`/api/biometric/devices/${id}/rotate-key`,{method:"POST"});alert("Key rotated.");loadPage("biometric")}catch(e){alert(e.message)}
+}
+function resetDeviceForm(){["bn","bm","bsn","bb","bi"].forEach(id=>$(id).value="");$("bp").value="4370";$("editDeviceId").value="";$("bioSaveBtn").textContent="Add Device";$("bioFormTitle").textContent="Register a device"}
+function editDevice(id){
+  const d=BIO_CACHE.find(x=>x.id===id);if(!d)return;
+  $("bn").value=d.name||"";$("bm").value=d.model||"";$("bsn").value=d.serial_no||"";$("bb").value=d.branch||"";$("bi").value=d.ip||"";$("bp").value=d.port||4370;
+  $("editDeviceId").value=d.id;$("bioSaveBtn").textContent="Update Device";$("bioFormTitle").textContent="Edit device";
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+async function saveDevice(){
+  const body={name:$("bn").value,model:$("bm").value,serial_no:$("bsn").value,branch:$("bb").value,ip:$("bi").value,port:$("bp").value};
+  const editId=$("editDeviceId").value;
+  try{
+    if(editId){await api("/api/biometric/devices/"+editId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Device updated");}
+    else{await api("/api/biometric/devices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Device added. Use \"Sync Now\" if this server is on the same network, or \"Sync Agent Config\" if the device is elsewhere.");}
+    resetDeviceForm();loadPage("biometric");
+  }catch(e){alert(e.message)}
+}
+async function syncDevice(id,btn){
+  const orig=btn.textContent;btn.textContent="Syncing...";btn.disabled=true;
+  try{
+    const r=await api(`/api/biometric/devices/${id}/sync`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({days:4})});
+    alert(`Sync complete (last ${r.days} days). ${r.totalOnDevice} logs on device, ${r.totalLogs} within range, ${r.matched} matched to employees${r.unmatched?`, ${r.unmatched} unmatched biometric IDs`:""}.`);
+    loadPage("biometric");
+  }catch(e){alert("Sync failed: "+e.message);loadPage("biometric")}
+  finally{btn.textContent=orig;btn.disabled=false}
+}
+
+/* ---------- Audit ---------- */
+function renderAudit(){
+  if(needsCompany("auditTable"))return;
+  const q=$("auditSearch").value;
+  const rows=filterRows(PAGEDATA.audit||[],["username","action","module","details"],q);
+  table("auditTable",["User","Action","Module","Details","Time"],rows.map(a=>[esc(a.username||"-"),a.action,a.module,esc(a.details),a.created_at]));
+}
+
+/* ---------- Email Settings ---------- */
+async function loadEmailSettings(){
+  try{
+    const d=await api("/api/email-settings");
+    $("esUser").value=d.smtp_user||"";
+    $("emailSettingsStatus").textContent=d.configured?`Currently sending as ${d.smtp_user}.`:"Not configured yet — using the platform default sender.";
+  }catch(e){$("emailSettingsStatus").textContent=e.message}
+}
+async function saveEmailSettings(){
+  try{await api("/api/email-settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({smtp_user:$("esUser").value,smtp_pass:$("esPass").value})});alert("Email settings saved");$("esPass").value="";loadEmailSettings();}
+  catch(e){alert(e.message)}
+}
+
+/* ---------- Password ---------- */
+function openPwd(){$("pwdCur").value="";$("pwdNew").value="";$("pwdErr").textContent="";$("pwdModal").classList.add("show")}
+async function doChangePwd(){
+  try{await api("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({current_password:$("pwdCur").value,new_password:$("pwdNew").value})});$("pwdModal").classList.remove("show");alert("Password updated")}catch(e){$("pwdErr").textContent=e.message}
+}
+
+(async()=>{try{const d=await api("/api/me");ME=d.user;boot()}catch{showLogin()}})();
+</script>
+</body>
+</html>

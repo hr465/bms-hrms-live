@@ -1,0 +1,9 @@
+{
+  "device_ip": "192.168.0.106",
+  "device_port": 4370,
+  "server_url": "http://localhost:3000",
+  "device_id": 1,
+  "api_key": "PASTE_THE_DEVICE_API_KEY_SHOWN_ON_THE_BIOMETRIC_PAGE",
+  "sync_interval_minutes": 5,
+  "lookback_days": 4
+}

@@ -1,0 +1,18 @@
+{
+  "name": "bms-hrms-live",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bhartiya Management Solutions - Enterprise HRMS live demo/starter",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "node-zklib": "^1.3.0",
+    "nodemailer": "^10.0.10",
+    "pg": "^8.23.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
