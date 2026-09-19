@@ -49,7 +49,23 @@ async function sendMailEx(to, subject, html, sender, attachments) {
     return { ok: false, error: "No sender Gmail is configured" };
   }
   try {
-    await transporter.sendMail({ from: `"${sender?.name ? sender.name + " · " : ""}${fromName}" <${user}>`, to, subject, html, attachments });
+    const from = `"${sender?.name ? sender.name + " · " : ""}${fromName}" <${user}>`;
+    if (process.env.MAIL_RELAY_URL && process.env.MAIL_RELAY_SECRET) {
+      // Some hosts block outbound SMTP; the relay (on a server that allows it) sends the message for us over HTTPS.
+      const r = await fetch(process.env.MAIL_RELAY_URL.replace(/\/$/, "") + "/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + process.env.MAIL_RELAY_SECRET },
+        body: JSON.stringify({
+          smtp: { user, pass }, from, to, subject, html,
+          attachments: (attachments || []).map(a => ({ filename: a.filename, contentType: a.contentType, contentBase64: Buffer.from(a.content).toString("base64") })),
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) throw new Error(d.error || `Mail relay error ${r.status}`);
+    } else {
+      await transporter.sendMail({ from, to, subject, html, attachments });
+    }
     await logEmail(sender?.company_id, to, subject, "sent", null);
     return { ok: true };
   } catch (e) {

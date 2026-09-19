@@ -1,0 +1,9 @@
+{
+  "name": "bms-mail-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny HTTPS-to-SMTP relay used when the portal host blocks outbound SMTP",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "nodemailer": "^7.0.0" }
+}
