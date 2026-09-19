@@ -277,7 +277,8 @@ app.get("/api/me",auth,wrap(async(req,res)=>{
 
 /* ---------------- Companies (Super Admin / platform) ---------------- */
 app.get("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
-  res.json(await db.prepare(`SELECT c.*,(SELECT COUNT(*) FROM employees e WHERE e.company_id=c.id AND e.status='Active') employee_count
+  res.json(await db.prepare(`SELECT c.id,c.name,c.code,c.industry,c.address,c.contact_email,c.contact_phone,c.status,c.created_at,c.custom_domain,c.smtp_user,
+    (SELECT COUNT(*) FROM employees e WHERE e.company_id=c.id AND e.status='Active') employee_count
     FROM companies c ORDER BY c.id DESC`).all());
 }));
 app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
@@ -304,11 +305,34 @@ app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
     res.json({ok:true,id:companyId});
   }catch(e){res.status(400).json({error:/duplicate key|unique/i.test(e.message)?"Company code already exists":e.message})}
 }));
+const EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 app.put("/api/companies/:id",auth,roles("Super Admin"),wrap(async(req,res)=>{
-  const x=req.body;
-  await db.prepare("UPDATE companies SET name=?,industry=?,address=?,contact_email=?,contact_phone=? WHERE id=?")
-    .run(x.name,x.industry||"",x.address||"",x.contact_email||"",x.contact_phone||"",req.params.id);
+  const x=req.body||{};
+  if(!String(x.name||"").trim())return res.status(400).json({error:"Company name is required"});
+  if(x.contact_email&&!EMAIL_RE.test(x.contact_email))return res.status(400).json({error:"Enter a valid contact email address"});
+  const r=await db.prepare("UPDATE companies SET name=?,industry=?,address=?,contact_email=?,contact_phone=? WHERE id=?")
+    .run(String(x.name).trim(),x.industry||"",x.address||"",x.contact_email||"",x.contact_phone||"",req.params.id);
+  if(r.changes===0)return res.status(404).json({error:"Company not found"});
   await audit(req,"UPDATE","COMPANY",req.params.id);res.json({ok:true});
+}));
+app.post("/api/companies/:id/email-settings",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  const {smtp_user,smtp_pass}=req.body||{};
+  if(smtp_user&&!EMAIL_RE.test(smtp_user))return res.status(400).json({error:"Enter a valid sender email address"});
+  const r=smtp_pass
+    ?await db.prepare("UPDATE companies SET smtp_user=?,smtp_pass=? WHERE id=?").run(smtp_user||null,smtp_pass,req.params.id)
+    :await db.prepare("UPDATE companies SET smtp_user=? WHERE id=?").run(smtp_user||null,req.params.id);
+  if(r.changes===0)return res.status(404).json({error:"Company not found"});
+  await audit(req,"UPDATE","EMAIL_SETTINGS",String(req.params.id));res.json({ok:true});
+}));
+app.get("/api/company-profile",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT name,code,industry,address,contact_email,contact_phone,custom_domain FROM companies WHERE id=?").get(req.user.company_id));
+}));
+app.post("/api/company-profile",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const x=req.body||{};
+  if(x.contact_email&&!EMAIL_RE.test(x.contact_email))return res.status(400).json({error:"Enter a valid contact email address"});
+  await db.prepare("UPDATE companies SET industry=?,address=?,contact_email=?,contact_phone=? WHERE id=?")
+    .run(x.industry||"",x.address||"",x.contact_email||"",x.contact_phone||"",req.user.company_id);
+  await audit(req,"UPDATE","COMPANY_PROFILE","");res.json({ok:true});
 }));
 app.post("/api/companies/:id/domain",auth,roles("Super Admin"),wrap(async(req,res)=>{
   let d=String(req.body?.domain||"").trim().toLowerCase().replace(/^https?:\/\//,"").replace(/\/.*$/,"");

@@ -356,6 +356,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 
 <section id="audit" class="page"><div class="pagehead"><h2>Audit Log</h2></div><div class="searchbar"><input id="auditSearch" placeholder="Search user / action / module..." oninput="renderAudit()"></div><div id="auditTable" class="tblwrap"></div></section>
 <section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
+<div class="panel"><h3>Company profile</h3><p class="small" style="margin-bottom:10px">These details appear on letters and emails. The company name and web address are managed by the platform administrator.</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Industry</label><input id="cpIndustry"></div><div class="field"><label>Contact phone</label><input id="cpPhone"></div></div><div class="field"><label>Address</label><input id="cpAddress"></div><div class="field"><label>Contact email</label><input id="cpEmail" placeholder="hr@company.com"></div><button onclick="saveCompanyProfile()">Save profile</button></div>
 <div class="panel"><h3>Email Settings</h3><p class="small" id="emailSettingsStatus">Loading...</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Sender Gmail</label><input id="esUser" placeholder="companyhr@gmail.com"></div><div class="field"><label>App Password</label><input id="esPass" type="password" placeholder="16-char app password (leave blank to keep current)"></div></div><button onclick="saveEmailSettings()">Save</button><p class="small" style="margin-top:10px">Used to send announcements, payslips and login emails to this company's employees. Leave both blank to use the platform default sender.</p></div>
 <div class="panel"><h3>Policy Agreement</h3><p class="small" style="margin-bottom:10px">This text is used whenever you generate a new onboarding agreement for an employee (Agreements page). Editing it only affects future agreements, not ones already in progress.</p><textarea id="policyText" style="min-height:220px"></textarea><div class="actions" style="margin-top:10px"><button onclick="savePolicyText()">Save</button></div></div>
 </section>
@@ -404,6 +405,24 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 </div>
 <div id="compErr" class="err"></div>
 <div class="actions"><button onclick="submitCompany()">Onboard Company</button><button class="gray" onclick="$('compModal').classList.remove('show')">Cancel</button></div>
+</div></div>
+
+<div class="modalbg" id="editCompModal"><div class="modal" style="max-width:560px">
+<h3>Edit company</h3>
+<div class="field"><label>Company name</label><input id="ecName"></div>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="field"><label>Industry</label><input id="ecIndustry"></div>
+<div class="field"><label>Contact phone</label><input id="ecPhone"></div>
+</div>
+<div class="field"><label>Address</label><input id="ecAddress"></div>
+<div class="field"><label>Contact email</label><input id="ecEmail" placeholder="hr@company.com"></div>
+<div class="small" style="margin:12px 0 6px;font-weight:700;color:#334155">Email sender (Gmail used for payslips, letters and notices)</div>
+<div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="field"><label>Sender Gmail</label><input id="ecSmtpUser" placeholder="companyhr@gmail.com"></div>
+<div class="field"><label>App password</label><input id="ecSmtpPass" type="password" placeholder="Leave blank to keep current"></div>
+</div>
+<div id="ecErr" class="err"></div>
+<div class="actions" style="margin-top:12px"><button onclick="saveEditCompany()">Save changes</button><button class="gray" onclick="$('editCompModal').classList.remove('show')">Cancel</button></div>
 </div></div>
 
 <div class="modalbg" id="domainModal"><div class="modal" style="max-width:520px">
@@ -695,7 +714,7 @@ async function loadPage(id){
   if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();}
   if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);loadUnregistered();if(!$("editDeviceId").value)onBioModeChange();}
   if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
-  if(id==="settings"){loadEmailSettings();loadPolicyText();}
+  if(id==="settings"){loadCompanyProfile();loadEmailSettings();loadPolicyText();}
   if(id==="agreements"){await loadAgreements();}
   if(id==="calendar"){await loadCalendar();}
   if(id==="team"){await loadTeam();}
@@ -713,7 +732,26 @@ async function companyStatus(id,status){try{await api(`/api/companies/${id}/stat
 function renderCompanies(){
   const rows=PAGEDATA.companies||[];
   table("compTable",["Company","Code","Domain","Industry","Employees","Status","Onboarded","Action"],rows.map(c=>[esc(c.name),`<span class="chip">${esc(c.code)}</span>`,c.custom_domain?esc(c.custom_domain):`<span class="small">Not set</span>`,esc(c.industry||"-"),c.employee_count,statusBadge(c.status),c.created_at,
-    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">Manage</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">Manage</button><button class="sm gray" onclick="openEditCompany(${c.id})">Edit</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+}
+let EDIT_CO=null;
+function openEditCompany(id){
+  const c=(PAGEDATA.companies||[]).find(x=>x.id===id);if(!c)return;
+  EDIT_CO=c;
+  $("ecName").value=c.name||"";$("ecIndustry").value=c.industry||"";$("ecPhone").value=c.contact_phone||"";$("ecAddress").value=c.address||"";$("ecEmail").value=c.contact_email||"";
+  $("ecSmtpUser").value=c.smtp_user||"";$("ecSmtpPass").value="";$("ecErr").textContent="";
+  $("editCompModal").classList.add("show");
+}
+async function saveEditCompany(){
+  const h={"Content-Type":"application/json"};
+  try{
+    await api(`/api/companies/${EDIT_CO.id}`,{method:"PUT",headers:h,body:JSON.stringify({name:$("ecName").value,industry:$("ecIndustry").value,address:$("ecAddress").value,contact_email:$("ecEmail").value,contact_phone:$("ecPhone").value})});
+    if($("ecSmtpUser").value!==(EDIT_CO.smtp_user||"")||$("ecSmtpPass").value)
+      await api(`/api/companies/${EDIT_CO.id}/email-settings`,{method:"POST",headers:h,body:JSON.stringify({smtp_user:$("ecSmtpUser").value,smtp_pass:$("ecSmtpPass").value})});
+    $("editCompModal").classList.remove("show");
+    await alert("The company details have been saved.");
+    await loadPage("companies");loadCompaniesCache();
+  }catch(e){$("ecErr").textContent=e.message}
 }
 let DOMAIN_CO=null;
 function openDomain(id){
@@ -1318,6 +1356,18 @@ function renderAudit(){
   const q=$("auditSearch").value;
   const rows=filterRows(PAGEDATA.audit||[],["username","action","module","details"],q);
   table("auditTable",["User","Action","Module","Details","Time"],rows.map(a=>[esc(a.username||"-"),a.action,a.module,esc(a.details),a.created_at]));
+}
+
+/* ---------- Company profile (Settings) ---------- */
+async function loadCompanyProfile(){
+  try{
+    const c=await api("/api/company-profile");
+    $("cpIndustry").value=c.industry||"";$("cpPhone").value=c.contact_phone||"";$("cpAddress").value=c.address||"";$("cpEmail").value=c.contact_email||"";
+    const ro=!isHR();["cpIndustry","cpPhone","cpAddress","cpEmail"].forEach(id=>$(id).disabled=ro);
+  }catch(e){}
+}
+async function saveCompanyProfile(){
+  try{await api("/api/company-profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({industry:$("cpIndustry").value,contact_phone:$("cpPhone").value,address:$("cpAddress").value,contact_email:$("cpEmail").value})});alert("The company profile has been saved.")}catch(e){alert(e.message)}
 }
 
 /* ---------- Email Settings ---------- */
