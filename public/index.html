@@ -118,6 +118,21 @@ tr:last-child td{border-bottom:0}
 .dlg h4{margin:0 0 6px;font-size:16px}
 .dlg .dlgmsg{font-size:13.5px;color:#334155;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin-bottom:18px}
 .dlg .dlgactions{display:flex;justify-content:flex-end;gap:8px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.two>.panel{margin:0}
+.barrow{display:grid;grid-template-columns:130px 1fr 78px;gap:10px;align-items:center;margin:7px 0;font-size:12.5px}
+.barlbl{color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bartrack{background:#eef0f4;border-radius:99px;height:9px;overflow:hidden}
+.barfill{background:var(--brand);height:100%;border-radius:99px}
+.barval{text-align:right;font-weight:700;color:var(--ink)}
+.miscards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+.dlbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.dlbar input{width:auto;padding:6px 8px;font-size:12px}
+.slabrow{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:8px;max-width:520px}
+.eomtop{border:1px solid var(--line);border-radius:12px;padding:14px;background:linear-gradient(135deg,#f5f3ff,#fff);margin-bottom:12px}
+@media(max-width:950px){.two,.miscards{grid-template-columns:1fr 1fr}}
+@media(max-width:650px){.two,.miscards{grid-template-columns:1fr}.barrow{grid-template-columns:90px 1fr 70px}}
+@media print{header,aside,.pagehead button,.pagehead input,.dlbar,.compswitch{display:none!important}.layout{display:block}main{padding:0;max-width:none}.card,.panel{break-inside:avoid}body{background:#fff}}
 .chip{display:inline-block;padding:3px 9px;border-radius:6px;background:#f1f2f7;font-size:11px;font-weight:700;color:#475569;margin-right:6px}
 .emptystate{padding:40px 20px;text-align:center;color:var(--sub);font-size:13px}
 .trend{display:flex;align-items:flex-end;gap:6px;height:70px;margin-top:10px}
@@ -152,12 +167,11 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
     <div class="loginbox">
       <h2>Sign in</h2>
       <div class="small">Enter your credentials to access your workspace</div>
-      <div class="field"><label>Username</label><input id="lu" value="admin"></div>
-      <div class="field"><label>Password</label><input id="lp" type="password" value="Admin@12345"></div>
+      <div class="field"><label>Username</label><input id="lu" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+      <div class="field"><label>Password</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
       <div id="loginErr" class="err"></div>
       <button class="block" onclick="doLogin()">Login</button>
       <div style="text-align:right;margin-top:8px"><a href="#" style="font-size:12.5px;color:var(--brand)" onclick="event.preventDefault();openForgot()">Forgot password?</a></div>
-      <div class="demoBox"><b>Demo accounts</b><br>admin / Admin@12345 (Platform Super Admin)<br>hr / HR@12345<br>manager / Manager@12345<br>finance / Finance@12345<br>employee / Employee@12345</div>
     </div>
   </div>
 </div>
@@ -274,7 +288,27 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <section id="team" class="page"><div class="pagehead"><h2>Team</h2><div class="desc">Manage internal logins — Director (final sign-off), extra HR/Manager/Finance accounts.</div></div>
 <div class="panel"><h3>Add team member</h3><div class="grid"><input id="tmUser" placeholder="Username"><input id="tmPass" type="password" placeholder="Password (min 8 chars)"><select id="tmRole"><option>Director</option><option>HR Admin</option><option>Manager</option><option>Finance</option></select><input id="tmEmail" placeholder="Email (for login notice)"><input id="tmEmpLink" list="empDL" placeholder="Link to employee record (optional)"></div><p class="small">Linking a Manager to their employee record lets them see only the team reporting to them.</p><button onclick="addTeamMember()">Add</button></div>
 <div id="teamTable" class="tblwrap"></div></section>
-<section id="performance" class="page"><div class="pagehead"><h2>Performance / KRA / KPI</h2></div><div class="panel"><div class="grid"><input id="peid" list="empDL" placeholder="Type employee name/code"><input id="pec" placeholder="Review Cycle"><input id="per" type="number" step=".1" placeholder="Rating"></div><textarea id="pegol" placeholder="Goals / KRA / KPI"></textarea><textarea id="pecm" placeholder="Manager comments"></textarea><button onclick="savePerformance()">Save Review</button></div><div id="perfTable" class="tblwrap"></div></section>
+<section id="performance" class="page"><div class="pagehead"><div><h2>Performance Reviews</h2><div class="desc">Rate employees on a 1 to 5 scale. Finalized reviews feed salary increments and Employee of the Month.</div></div></div>
+<div id="perfForm" class="panel" style="display:none"><h3 id="perfFormTitle">New review</h3>
+<div class="grid"><div class="field"><label>Employee</label><input id="peid" list="empDL" placeholder="Type employee name or code"></div><div class="field"><label>Review cycle</label><input id="pec" placeholder="e.g. FY 2026-27"></div>
+<div class="field"><label>Rating</label><select id="per"><option value="5">5.0 - Outstanding</option><option value="4.5">4.5</option><option value="4" selected>4.0 - Exceeds expectations</option><option value="3.5">3.5</option><option value="3">3.0 - Meets expectations</option><option value="2.5">2.5</option><option value="2">2.0 - Needs improvement</option><option value="1.5">1.5</option><option value="1">1.0 - Unsatisfactory</option></select></div></div>
+<div class="field"><label>Goals / KRA / KPI</label><textarea id="pegol"></textarea></div><div class="field"><label>Manager comments</label><textarea id="pecm"></textarea></div>
+<div class="actions"><button onclick="savePerformance()">Save Review</button><button class="gray" onclick="resetPerfForm()">Clear</button></div></div>
+<div class="searchbar"><input id="perfSearch" placeholder="Search employee or cycle..." oninput="renderPerformance()"></div>
+<div id="perfTable" class="tblwrap"></div></section>
+
+<section id="increments" class="page"><div class="pagehead"><div><h2>Salary Increments</h2><div class="desc">Yearly revision calculated from finalized performance ratings using your increment policy.</div></div></div>
+<div class="panel"><h3>Increment policy</h3><p class="small" style="margin-bottom:10px">Set the increment percentage for each minimum rating. The highest slab the employee's rating qualifies for is applied.</p><div id="slabRows"></div>
+<div class="actions" style="margin-top:10px"><button class="gray sm" id="slabAdd" onclick="addSlabRow()">Add slab</button><button id="slabSave" onclick="saveSlabs()">Save policy</button></div></div>
+<div class="panel"><h3>Calculate increments</h3><div class="grid"><div class="field"><label>Review cycle</label><input id="incCycle" placeholder="e.g. FY 2026-27"></div><div class="field"><label>Effective date</label><input id="incDate" type="date"></div><div class="field"><label>&nbsp;</label><button onclick="previewIncrements()">Calculate</button></div></div>
+<div id="incPreview" class="tblwrap" style="margin-top:12px"></div><div id="incApplyBar" class="actions" style="display:none;margin-top:12px"><button onclick="applyIncrements()">Apply selected increments</button></div></div>
+<h3 style="margin:18px 0 8px">Increment history</h3><div id="incHistory" class="tblwrap"></div></section>
+
+<section id="recognition" class="page"><div class="pagehead"><div><h2>Employee Recognition</h2><div class="desc">Data-driven Employee of the Month suggestion based on attendance, punctuality and performance rating.</div></div></div>
+<div id="eomPanel" class="panel" style="display:none"><div class="toolbar"><div class="field" style="max-width:220px;margin:0"><label>Month</label><input id="eomMonth" type="month" onchange="loadEom()"></div></div><div id="eomBody" style="margin-top:12px"></div></div>
+<h3 style="margin:18px 0 8px">Hall of fame</h3><div id="awardsList" class="tblwrap"></div></section>
+
+<section id="mis" class="page"><div class="pagehead"><div><h2>MIS Reports</h2><div class="desc">Management overview across workforce, attendance, payroll, hiring and performance.</div></div><div class="actions"><input id="misMonth" type="month" style="width:auto" onchange="loadMis()"><button class="outline" onclick="window.print()">Print report</button></div></div><div id="misBody"></div></section>
 
 <section id="assets" class="page"><div class="pagehead"><h2>Asset Management</h2><button id="assetAddBtn" style="display:none" onclick="$('assetForm').style.display='block'">+ Add Asset</button></div><div id="assetForm" class="panel" style="display:none"><div class="grid"><input id="ac" placeholder="Asset Code"><input id="an" placeholder="Asset Name"><input id="acat" placeholder="Category"><input id="asn" placeholder="Serial No"><input id="ae" list="empDL" placeholder="Assign to Employee (optional)"></div><button onclick="addAsset()">Save Asset</button></div>
 <div class="searchbar"><input id="assetSearch" placeholder="Search asset / employee..." oninput="renderAssets()"></div>
@@ -463,6 +497,9 @@ function setEmpInput(inputId,empId){
 }
 
 const ICONS={
+ mis:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+ increments:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>',
+ recognition:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="9" r="5"/><path d="M8.5 13.5L7 21l5-3 5 3-1.5-7.5"/></svg>',
  calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v3M16 3v3"/><path d="M12 13a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM7 17a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"/></svg>',
  agreements:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 3h12l4 4v14H4z"/><path d="M16 3v4h4M8 13l2 2 5-5"/></svg>',
  team:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c.6-3.6 2.8-5.5 5.5-5.5s4.9 1.9 5.5 5.5M14 20c.4-2.6 1.9-4.2 4-4.2s3.3 1.4 3.8 4.2"/></svg>',
@@ -490,11 +527,11 @@ function navBuild(){
  const r=ME.role;
  const sections=[];
  if(r==="Super Admin")sections.push({t:"Platform",items:[["companies","Companies",true]]});
- sections.push({t:"Overview",items:[["dashboard","Dashboard",true]]});
+ sections.push({t:"Overview",items:[["dashboard","Dashboard",true],["mis","MIS Reports",["Super Admin","HR Admin","Director","Finance"].includes(r)]]});
  sections.push({t:"Organization",items:[["employees","Employees",true]]});
  sections.push({t:"Time & Leave",items:[["attendance","Attendance",true],["leave","Leave",true]]});
  sections.push({t:"Payroll & Finance",items:[["payroll","Payroll",["Super Admin","HR Admin","Finance","Manager"].includes(r)],["expenses","Expenses",true]]});
- sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin"].includes(r)],["agreements","Agreements",true],["performance","Performance",true]]});
+ sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin"].includes(r)],["agreements","Agreements",true],["performance","Performance",true],["increments","Increments",["Super Admin","HR Admin","Director"].includes(r)],["recognition","Recognition",true]]});
  sections.push({t:"Assets & Docs",items:[["assets","Assets",["Super Admin","HR Admin"].includes(r)],["documents","Documents",true]]});
  sections.push({t:"Engagement",items:[["calendar","Calendar",true],["announcements","Announcements",true],["tickets","HR Helpdesk",true],["exits","Exit / Separation",true]]});
  sections.push({t:"Administration",items:[["team","Team",["Super Admin","HR Admin"].includes(r)],["biometric","Biometric / eSSL",["Super Admin","HR Admin"].includes(r)],["audit","Audit Log",["Super Admin","HR Admin"].includes(r)],["settings","HR Policies",["Super Admin","HR Admin"].includes(r)]]});
@@ -507,7 +544,7 @@ function navBuild(){
  $("whoRole").textContent=ME.role;
  $("avatarTxt").textContent=ME.username.slice(0,2).toUpperCase();
 }
-function page(id){document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));document.querySelectorAll("nav button").forEach(x=>x.classList.remove("sel"));$(id).classList.add("active");const n=$("nav_"+id);if(n)n.classList.add("sel");loadPage(id)}
+function page(id){document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));document.querySelectorAll("nav button").forEach(x=>x.classList.remove("sel"));$(id).classList.add("active");const n=$("nav_"+id);if(n)n.classList.add("sel");ensureDownloadBar(id);loadPage(id)}
 
 async function loadEmployeesCache(){
   if(!COMPANY){EMP=[];fillEmpDatalist();return}
@@ -593,7 +630,7 @@ async function loadDashboard(){
 }
 
 function table(target,heads,rows){$(target).innerHTML=`<table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${heads.length}"><div class="emptystate">No records yet</div></td></tr>`}</tbody></table>`}
-function statusBadge(s){const cls=/approved|active|closed|complete|done|joined|processed/i.test(s)?"ok":/rejected|inactive|absent/i.test(s)?"bad":"warn";return `<span class="badge ${cls}">${esc(s)}</span>`}
+function statusBadge(s){const cls=/approved|active|closed|complete|done|joined|processed|finalized/i.test(s)?"ok":/rejected|inactive|absent/i.test(s)?"bad":"warn";return `<span class="badge ${cls}">${esc(s)}</span>`}
 function filterRows(rows,fields,q){if(!q)return rows;q=q.toLowerCase();return rows.filter(r=>fields.some(f=>String(r[f]??"").toLowerCase().includes(q)))}
 
 function needsCompany(target){
@@ -615,7 +652,10 @@ async function loadPage(id){
   if(id==="payroll"){PAGEDATA.payroll=await api("/api/payroll");renderPayroll();}
   if(id==="recruitment"){PAGEDATA.recruitment=await api("/api/candidates");renderCandidates();}
   if(id==="onboarding"){let x=await api("/api/onboarding");table("onboardTable",["Employee","Offer","Documents","Verification","Assets","Policy","Complete",isHR()?"Action":""],x.map(a=>[a.employee_code+" - "+a.name,statusBadge(a.offer?"Done":"Pending"),statusBadge(a.documents?"Done":"Pending"),statusBadge(a.verification?"Done":"Pending"),statusBadge(a.assets?"Done":"Pending"),statusBadge(a.policy?"Done":"Pending"),statusBadge(a.completed?"Done":"Pending"),isHR()?onboardActions(a):""]));}
-  if(id==="performance"){PAGEDATA.performance=await api("/api/performance");table("perfTable",["Employee","Cycle","Goals","Rating","Status"],PAGEDATA.performance.map(a=>[a.employee_code+" - "+a.name,esc(a.cycle),esc(a.goals),a.rating,statusBadge(a.status)]));}
+  if(id==="performance"){$("perfForm").style.display=["Super Admin","HR Admin","Manager"].includes(ME.role)?"":"none";PAGEDATA.performance=await api("/api/performance");renderPerformance();}
+  if(id==="mis"){await loadMis();}
+  if(id==="increments"){await loadIncrements();}
+  if(id==="recognition"){await loadRecognition();}
   if(id==="assets"){PAGEDATA.assets=await api("/api/assets");renderAssets();}
   if(id==="expenses"){PAGEDATA.expenses=await api("/api/expenses");renderExpenses();}
   if(id==="documents"){let x=await api("/api/documents");table("docTable",["Employee","Document","Type","Expiry","Status","File"],x.map(a=>[a.employee_code+" - "+a.employee_name,esc(a.name),esc(a.doc_type),a.expiry_date,statusBadge(a.status),a.file_name?`<a href="/api/documents/${a.id}/file" target="_blank">${esc(a.file_name)}</a>`:"-"]));}
@@ -801,9 +841,174 @@ function onboardActions(a){
 async function markOnboard(id,payload){try{await api("/api/onboarding/"+id,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});loadPage("onboarding")}catch(e){alert(e.message)}}
 
 /* ---------- Performance ---------- */
+const inr=n=>"₹"+Number(n||0).toLocaleString("en-IN");
+function currentFY(){const d=new Date(),m=d.getMonth()+1,s=m>=4?d.getFullYear():d.getFullYear()-1;return `FY ${s}-${String(s+1).slice(2)}`}
+
+/* ---------- Downloads (Excel / CSV) ---------- */
+const PAGE_EXPORTS={
+  employees:{ds:"employees",roles:["Super Admin","HR Admin","Director","Finance","Manager"]},
+  attendance:{ds:"attendance",roles:["Super Admin","HR Admin","Director","Manager"],filters:[["from","From"],["to","To"]]},
+  leave:{ds:"leaves",roles:["Super Admin","HR Admin","Director","Manager"]},
+  payroll:{ds:"payroll",roles:["Super Admin","HR Admin","Director","Finance"],filters:[["month","Month"]]},
+  expenses:{ds:"expenses",roles:["Super Admin","HR Admin","Director","Finance","Manager"]},
+  performance:{ds:"performance",roles:["Super Admin","HR Admin","Director","Manager"]},
+  recruitment:{ds:"candidates",roles:["Super Admin","HR Admin","Director","Manager"]},
+  assets:{ds:"assets",roles:["Super Admin","HR Admin","Director"]},
+  increments:{ds:"increments",roles:["Super Admin","HR Admin","Director"]}
+};
+function ensureDownloadBar(pageId){
+  const cfg=PAGE_EXPORTS[pageId];const host=$(pageId);
+  const old=$("dl_"+pageId);if(old)old.remove();
+  if(!cfg||!host||!ME||!cfg.roles.includes(ME.role)||!COMPANY)return;
+  const head=host.querySelector(".pagehead");if(!head)return;
+  const bar=document.createElement("div");bar.className="dlbar";bar.id="dl_"+pageId;
+  const filt=(cfg.filters||[]).map(([k,l])=>`<span class="small">${l}</span><input data-f="${k}" type="${k==="month"?"month":"date"}">`).join("");
+  bar.innerHTML=`${filt}<button class="sm outline" onclick="downloadData('${cfg.ds}','xlsx','${pageId}')">Download Excel</button><button class="sm gray" onclick="downloadData('${cfg.ds}','csv','${pageId}')">Download CSV</button>`;
+  head.appendChild(bar);
+}
+async function downloadData(ds,format,pageId){
+  const params=new URLSearchParams({format});
+  const bar=$("dl_"+pageId);
+  if(bar)bar.querySelectorAll("input[data-f]").forEach(i=>{if(i.value)params.set(i.dataset.f,i.value)});
+  try{
+    const r=await fetch(`/api/export/${ds}?`+params.toString());
+    if(r.status===401){showLogin();return}
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw Error(d.error||"Download failed")}
+    const blob=await r.blob();
+    const cd=r.headers.get("Content-Disposition")||"";
+    const name=(cd.match(/filename="([^"]+)"/)||[])[1]||`${ds}.${format==="csv"?"csv":"xlsx"}`;
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  }catch(e){alert(e.message)}
+}
+
+/* ---------- Performance ---------- */
+function resetPerfForm(){["peid","pec","pegol","pecm"].forEach(id=>$(id).value="");$("per").value="4";$("perfFormTitle").textContent="New review"}
+function renderPerformance(){
+  if(needsCompany("perfTable"))return;
+  const q=$("perfSearch").value;
+  const rows=filterRows((PAGEDATA.performance||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","cycle","reviewer"],q);
+  window.__perfrows=rows;
+  const canEdit=["Super Admin","HR Admin","Manager"].includes(ME.role),canFinal=["Super Admin","HR Admin","Director"].includes(ME.role);
+  table("perfTable",["Employee","Cycle","Rating","Reviewer","Status","Goals / KRA","Action"],rows.map((a,i)=>[esc(a.employee_code+" - "+a.name),esc(a.cycle),`<b>${Number(a.rating).toFixed(1)}</b> / 5`,esc(a.reviewer||"-"),statusBadge(a.status),esc((a.goals||"").slice(0,90)),
+    a.status!=="Finalized"?`<div class="actions">${canEdit?`<button class="sm outline" onclick="editPerf(${i})">Edit</button>`:""}${canFinal?`<button class="sm green" onclick="finalizePerf(${a.id})">Finalize</button>`:""}</div>`:""]));
+}
+function editPerf(i){
+  const a=window.__perfrows[i];if(!a)return;
+  setEmpInput("peid",a.employee_id);$("pec").value=a.cycle||"";$("per").value=String(Number(a.rating));$("pegol").value=a.goals||"";$("pecm").value=a.manager_comments||"";
+  $("perfFormTitle").textContent="Edit review";$("perfForm").scrollIntoView({behavior:"smooth"});
+}
+async function finalizePerf(id){
+  if(!await uiConfirm("Finalize this review? It can no longer be edited and will be used for salary increments and Employee of the Month.",{title:"Finalize review",okText:"Finalize"}))return;
+  try{await api(`/api/performance/${id}/finalize`,{method:"POST"});alert("The review has been finalized.");loadPage("performance")}catch(e){alert(e.message)}
+}
 async function savePerformance(){
   const eid=resolveEmp("peid");if(!eid)return alert("Please select a valid employee from the list.");
-  try{await api("/api/performance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,cycle:$("pec").value,rating:$("per").value,goals:$("pegol").value,manager_comments:$("pecm").value})});alert("Review saved");$("peid").value="";loadPage("performance")}catch(e){alert(e.message)}
+  if(!$("pec").value.trim())return alert("Please enter the review cycle, for example "+currentFY()+".");
+  try{const r=await api("/api/performance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,cycle:$("pec").value,rating:$("per").value,goals:$("pegol").value,manager_comments:$("pecm").value})});alert(r.updated?"The review has been updated.":"The review has been saved.");resetPerfForm();loadPage("performance")}catch(e){alert(e.message)}
+}
+
+/* ---------- Salary increments ---------- */
+let SLABS=[],INC_ROWS=[];
+function renderSlabs(){
+  const edit=isHR();
+  $("slabRows").innerHTML=SLABS.map((s,i)=>`<div class="slabrow"><div class="field" style="margin:0"><label>Minimum rating</label><input type="number" min="0" max="5" step="0.1" value="${s.min}" ${edit?"":"disabled"} oninput="SLABS[${i}].min=this.value"></div><div class="field" style="margin:0"><label>Increment %</label><input type="number" min="0" max="100" step="0.5" value="${s.pct}" ${edit?"":"disabled"} oninput="SLABS[${i}].pct=this.value"></div>${edit?`<button class="gray sm" onclick="removeSlab(${i})">Remove</button>`:"<span></span>"}</div>`).join("");
+  $("slabAdd").style.display=edit?"":"none";$("slabSave").style.display=edit?"":"none";
+}
+function addSlabRow(){if(SLABS.length>=10)return alert("You can define at most 10 slabs.");SLABS.push({min:0,pct:0});renderSlabs()}
+function removeSlab(i){SLABS.splice(i,1);renderSlabs()}
+async function saveSlabs(){
+  try{await api("/api/increment-policy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({slabs:SLABS.map(s=>({min:Number(s.min),pct:Number(s.pct)}))})});alert("The increment policy has been saved.");loadIncrements()}catch(e){alert(e.message)}
+}
+async function loadIncrements(){
+  if(needsCompany("incPreview"))return;
+  const p=await api("/api/increment-policy");SLABS=p.slabs.sort((a,b)=>b.min-a.min);renderSlabs();
+  if(!$("incCycle").value)$("incCycle").value=currentFY();
+  if(!$("incDate").value)$("incDate").value=new Date().toISOString().slice(0,10);
+  const h=await api("/api/increments");
+  table("incHistory",["Employee","Cycle","Rating","Increment","Old CTC","New CTC","Effective","Applied by"],h.map(i=>[esc(i.employee_code+" - "+i.name),esc(i.cycle),i.rating!=null?Number(i.rating).toFixed(1):"-",`<b>${i.percent}%</b>`,inr(i.old_ctc),inr(i.new_ctc),esc(i.effective_date),esc(i.applied_by||"-")]));
+}
+async function previewIncrements(){
+  const cycle=$("incCycle").value.trim();if(!cycle)return alert("Please enter the review cycle.");
+  try{
+    const d=await api("/api/increments/preview?cycle="+encodeURIComponent(cycle));
+    INC_ROWS=d.rows;
+    table("incPreview",["","Employee","Department","Rating","Increment %","Current CTC (monthly)","Revised CTC","Remarks"],INC_ROWS.map((r,i)=>[
+      r.applicable?`<input type="checkbox" id="inc_c${i}" ${r.percent>0?"checked":""} style="width:auto">`:"",
+      esc(r.employee_code+" - "+r.name),esc(r.department||"-"),r.rating!=null?r.rating.toFixed(2):"-",
+      r.applicable?`<input type="number" min="0" max="100" step="0.5" value="${r.percent}" style="width:90px" oninput="incRecalc(${i},this.value)">`:"-",
+      inr(r.current_ctc),r.applicable?`<span id="inc_n${i}">${inr(r.new_ctc)}</span>`:"-",r.note?`<span class="small">${esc(r.note)}</span>`:""]));
+    $("incApplyBar").style.display=INC_ROWS.some(r=>r.applicable)?"flex":"none";
+  }catch(e){alert(e.message)}
+}
+function incRecalc(i,v){const r=INC_ROWS[i];r.percent=Number(v)||0;r.new_ctc=Math.round(r.current_ctc*(1+r.percent/100));$("inc_n"+i).textContent=inr(r.new_ctc);const c=$("inc_c"+i);if(c)c.checked=r.percent>0}
+async function applyIncrements(){
+  const items=INC_ROWS.map((r,i)=>({r,i})).filter(x=>x.r.applicable&&$("inc_c"+x.i)&&$("inc_c"+x.i).checked&&x.r.percent>0).map(x=>({employee_id:x.r.employee_id,percent:x.r.percent}));
+  if(!items.length)return alert("Please select at least one employee with an increment percentage.");
+  if(!$("incDate").value)return alert("Please choose the effective date.");
+  if(!await uiConfirm(`Apply increments to ${items.length} employee${items.length===1?"":"s"}? Their salary structure will be updated and each employee will be notified by email.`,{title:"Apply salary increments",okText:"Apply Increments"}))return;
+  try{const r=await api("/api/increments/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({cycle:$("incCycle").value.trim(),effective_date:$("incDate").value,items})});alert(`Increments applied to ${r.applied} employee${r.applied===1?"":"s"}${r.skipped?`, ${r.skipped} skipped`:""}.`);await loadIncrements();previewIncrements()}catch(e){alert(e.message)}
+}
+
+/* ---------- Recognition (Employee of the Month) ---------- */
+async function loadRecognition(){
+  if(needsCompany("awardsList"))return;
+  const mgr=["Super Admin","HR Admin","Director"].includes(ME.role);
+  $("eomPanel").style.display=mgr?"":"none";
+  if(mgr){if(!$("eomMonth").value)$("eomMonth").value=new Date().toISOString().slice(0,7);await loadEom()}
+  const a=await api("/api/awards");
+  table("awardsList",["Month","Award","Employee","Department","Score","Note"],a.map(x=>[esc(new Date(x.period+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"})),esc(x.award_type),`<b>${esc(x.employee_code+" - "+x.name)}</b>`,esc(x.department||"-"),x.score!=null?Number(x.score).toFixed(1):"-",esc(x.note||"")]));
+}
+async function loadEom(){
+  const m=$("eomMonth").value;if(!m)return;
+  try{
+    const d=await api("/api/eom?month="+m);
+    window.__eom=d.candidates;
+    const top=d.candidates[0];
+    const noData=!d.candidates.some(c=>c.has_attendance_data);
+    let html="";
+    if(d.declared)html+=`<div class="notice" style="background:#f0fdf4;border-color:#bbf7d0;margin-bottom:12px">Declared for this month: <b>${esc(d.declared.employee_code+" - "+d.declared.name)}</b>${d.declared.score!=null?` (score ${Number(d.declared.score).toFixed(1)})`:""}.</div>`;
+    if(noData)html+=`<div class="notice" style="margin-bottom:12px">No attendance has been recorded for this month yet, so suggestions rely only on performance ratings. Sync the biometric device or record attendance for a reliable result.</div>`;
+    if(top&&top.score>0)html+=`<div class="eomtop"><div class="small">Suggested Employee of the Month</div><div style="font-size:20px;font-weight:800;margin:4px 0">${esc(top.name)}</div><div class="small">${esc(top.employee_code)} · ${esc(top.department||"")} · Score ${top.score}/100</div><div class="small" style="margin-top:6px">${top.reasons.map(esc).join(" · ")}</div></div>`;
+    if(!d.declared)html+=`<div class="field" style="max-width:520px"><label>Recognition note (optional, included in the announcement)</label><input id="eomNote" placeholder="e.g. Outstanding ownership and consistency this month"></div>`;
+    html+=`<div class="tblwrap"><table><thead><tr><th>Rank</th><th>Employee</th><th>Score</th><th>Attendance</th><th>Late</th><th>Rating</th><th></th></tr></thead><tbody>`+
+      d.candidates.map((c,i)=>`<tr><td>${i+1}</td><td><b>${esc(c.name)}</b><div class="small">${esc(c.employee_code)} · ${esc(c.department||"")}${c.recent_winner?` <span class="badge warn">Won recently</span>`:""}</div></td><td><b>${c.score}</b></td><td>${c.attendance_pct}%</td><td>${c.late_days}</td><td>${c.rating!=null?c.rating.toFixed(1):"-"}</td><td>${d.declared?"":`<button class="sm outline" onclick="declareEom(${c.employee_id})">Declare</button>`}</td></tr>`).join("")+
+      `</tbody></table></div><p class="small" style="margin-top:10px">Score = 40% latest finalized performance rating + 35% attendance + 25% punctuality (arrival after 09:45 counts as late). Approved leave is excluded from working days. Without a review, the 40% is shared between attendance and punctuality. Working days exclude Sundays.</p>`;
+    $("eomBody").innerHTML=html;
+  }catch(e){$("eomBody").innerHTML=`<div class="emptystate">${esc(e.message)}</div>`}
+}
+async function declareEom(empId){
+  const m=$("eomMonth").value;
+  const name=((window.__eom||[]).find(c=>c.employee_id===empId)||{}).name||"this employee";
+  if(!await uiConfirm(`Declare ${name} as Employee of the Month? An announcement will be published and emailed to all employees.`,{title:"Declare Employee of the Month",okText:"Declare"}))return;
+  try{await api("/api/eom/declare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({month:m,employee_id:empId,note:($("eomNote")||{}).value||""})});alert(`${name} has been declared Employee of the Month and the announcement was published.`);loadRecognition()}catch(e){alert(e.message)}
+}
+
+/* ---------- MIS reports ---------- */
+function bars(items,lk,vk,fmt){
+  if(!items||!items.length)return `<div class="small">No data</div>`;
+  const max=Math.max(1,...items.map(i=>Number(i[vk])||0));
+  return items.map(i=>`<div class="barrow"><span class="barlbl" title="${esc(i[lk])}">${esc(i[lk])}</span><div class="bartrack"><div class="barfill" style="width:${(Number(i[vk])||0)/max*100}%"></div></div><span class="barval">${fmt?fmt(i[vk]):i[vk]}</span></div>`).join("");
+}
+function misCard(label,val,sub){return `<div class="card"><div class="bar"></div><div class="lbl">${label}</div><div class="num">${val}</div>${sub?`<div class="small">${sub}</div>`:""}</div>`}
+function misPanel(title,inner){return `<div class="panel"><h3>${title}</h3>${inner}</div>`}
+async function loadMis(){
+  if(needsCompany("misBody"))return;
+  if(!$("misMonth").value)$("misMonth").value=new Date().toISOString().slice(0,7);
+  try{
+    const d=await api("/api/mis?month="+$("misMonth").value);
+    const h=d.headcount,a=d.attendance,l=d.leave,p=d.payroll,pf=d.performance;
+    const trendMax=Math.max(1,...p.trend.map(t=>t.net));
+    $("misBody").innerHTML=
+      `<div class="miscards">${misCard("Active employees",h.active,`${h.inactive} inactive`)}${misCard("New joiners (30 days)",h.newJoiners30)}${misCard("Attrition (12 months)",h.attritionPct+"%",`${h.exits12m} exit${h.exits12m===1?"":"s"}, ${h.pendingExits} pending`)}${misCard("Pending leave approvals",l.pendingApprovals)}</div>`+
+      `<div class="miscards">${misCard("Present days",a.present)}${misCard("Absent days",a.absent,`${a.halfDay} half day`)}${misCard("Late arrivals",a.late)}${misCard("Work from home (days)",l.wfhDays)}</div>`+
+      `<div class="miscards">${misCard("Net payroll",inr(p.net),`${p.processed} payslip${p.processed===1?"":"s"}`)}${misCard("Gross payroll",inr(p.gross))}${misCard("PF + ESIC + TDS",inr(p.pf+p.esic+p.tds),`LOP ${inr(p.lop)}`)}${misCard("Average rating",pf.average!=null?pf.average+" / 5":"-",`${pf.reviews} finalized review${pf.reviews===1?"":"s"}`)}</div>`+
+      `<div class="two">${misPanel("Headcount by department",bars(h.byDepartment,"department","count"))}${misPanel("Attendance by department",a.byDepartment.length?`<div class="tblwrap"><table><thead><tr><th>Department</th><th>Present</th><th>Absent</th><th>Half day</th><th>Late</th></tr></thead><tbody>${a.byDepartment.map(x=>`<tr><td>${esc(x.department)}</td><td>${x.present}</td><td>${x.absent}</td><td>${x.half_day}</td><td>${x.late}</td></tr>`).join("")}</tbody></table></div>`:`<div class="small">No attendance recorded for this month</div>`)}</div>`+
+      `<div class="two" style="margin-top:14px">${misPanel("Payroll cost by department (net)",bars(p.byDepartment,"department","net",inr))}${misPanel("Net payroll trend (last 6 months)",p.trend.length?`<div class="trend" style="height:120px">${p.trend.map(t=>`<div style="flex:1;text-align:center"><div class="small" style="font-size:10px">${inr(t.net)}</div><div class="b" style="height:${Math.max(4,t.net/trendMax*90)}px"></div><div class="lb">${esc(t.month)}</div></div>`).join("")}</div>`:`<div class="small">No payroll processed yet</div>`)}</div>`+
+      `<div class="two" style="margin-top:14px">${misPanel("Leave taken by type (days)",bars(l.byType,"leave_type","days"))}${misPanel("Recruitment pipeline",bars(d.recruitment,"status","count"))}</div>`+
+      `<div class="two" style="margin-top:14px">${misPanel("Expenses by category",bars(d.expenses.byCategory,"category","amount",inr))}${misPanel("Performance rating distribution",bars(pf.distribution,"label","count"))}</div>`+
+      `<div class="two" style="margin-top:14px">${misPanel("Assets",bars(d.assets,"status","count"))}${misPanel("Helpdesk",`<div class="num" style="font-size:26px;font-weight:800">${d.helpdesk.open}</div><div class="small">open tickets</div>`)}</div>`;
+  }catch(e){$("misBody").innerHTML=`<div class="emptystate">${esc(e.message)}</div>`}
 }
 
 /* ---------- Assets ---------- */

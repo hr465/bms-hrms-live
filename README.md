@@ -1,55 +1,40 @@
-# BMS Enterprise HRMS — Live v1
+# BMS Enterprise HRMS
 
-This is a locally runnable enterprise HRMS starter/demo for Bhartiya Management Solutions.
+Multi-company HR management platform for Bhartiya Management Solutions.
 
-## Included working areas
-- Login/logout and server-side sessions
-- Role-based access: Super Admin, HR Admin, Manager, Finance, Employee
-- Employee self-service scope
-- Employee master
-- Dashboard / MIS foundation
-- Attendance and manual attendance
-- eSSL-ready biometric device registry + punch ingestion API
-- Leave management
-- Payroll processing foundation
-- Recruitment / ATS
-- Digital onboarding
-- Performance / KRA/KPI foundation
-- Asset management
-- Expense/reimbursement
-- Employee documents
-- Announcements
-- HR helpdesk/tickets
-- Exit/separation
+## Modules
+
+- Multi-company workspaces with isolated data and role-based access (Super Admin, HR Admin, Director, Manager, Finance, Employee)
+- Employee master with statutory details (PF, ESIC, UAN, PAN), salary structure and reporting hierarchy
+- Attendance with eSSL / ZKTeco biometric integration (LAN sync and a local sync agent)
+- Leave, work from home and permission requests with balances
+- Payroll with automatic LOP, PF and ESIC calculation, bulk monthly run and emailed payslips
+- Performance reviews, rating-based yearly increments and Employee of the Month recognition
+- Onboarding agreements with sequential e-signatures (Employee, HR, Director)
+- Recruitment, assets, expenses, documents, announcements, helpdesk and exit management
+- MIS reports and Excel / CSV downloads
 - Audit log
-- Configurable HR policy foundation
 
-## Demo credentials
-admin / Admin@12345
-hr / HR@12345
-manager / Manager@12345
-finance / Finance@12345
-employee / Employee@12345
+## Configuration
 
-## Run on Windows
-Open CMD in this folder:
+Set these environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Default outgoing email account (companies can configure their own in Settings) |
+| `MAIL_FROM_NAME` | Sender display name |
+| `NODE_ENV` | Set to `production` to enable secure cookies |
+
+## Run locally
+
+```
 npm install
 npm start
+```
 
-Then open:
-http://localhost:3000
+The application listens on `PORT` (default 3000). On first start it creates the schema and a platform administrator account; change its password immediately after signing in.
 
-## Important
-This is a functional local v1/starter, not a production-certified HR/payroll product. Before production deployment, add PostgreSQL, HTTPS, encrypted secret management, backups, CSRF/rate limiting, email/SMS provider, document storage, statutory payroll validation, and a tested eSSL connector for the exact device model.
+## Biometric sync agent
 
-For eSSL:
-POST /api/biometric/punch
-{
-  "biometric_id":"1001",
-  "punch_time":"2026-08-13T09:30:00+05:30",
-  "punch_type":"IN",
-  "device_id":1,
-  "raw_payload":{}
-}
-
-The exact eSSL connector must be matched to the model/firmware and its supported API/SDK/ADMS mechanism.
+For devices on a private network, run `sync-agent.js` on a PC in the same LAN. See `sync-agent.config.example.json` and the Biometric page in the application.

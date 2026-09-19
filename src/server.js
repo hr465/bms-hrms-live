@@ -4,6 +4,7 @@ const crypto=require("crypto");
 const db=require("./db");
 const ZKLib=require("node-zklib");
 const {sendMail,layout}=require("./mail");
+const ExcelJS=require("exceljs");
 
 const app=express();
 const PORT=process.env.PORT||3000;
@@ -17,7 +18,7 @@ await db.exec(`
 CREATE TABLE IF NOT EXISTS companies(
  id SERIAL PRIMARY KEY, name TEXT NOT NULL, code TEXT UNIQUE NOT NULL, industry TEXT,
  address TEXT, contact_email TEXT, contact_phone TEXT, status TEXT DEFAULT 'Active', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
- smtp_user TEXT, smtp_pass TEXT, policy_agreement_text TEXT
+ smtp_user TEXT, smtp_pass TEXT, policy_agreement_text TEXT, increment_policy TEXT
 );
 CREATE TABLE IF NOT EXISTS users(
  id SERIAL PRIMARY KEY, company_id INTEGER, username TEXT UNIQUE, password_hash TEXT,
@@ -68,7 +69,17 @@ CREATE TABLE IF NOT EXISTS onboarding(
  verification INTEGER DEFAULT 0,assets INTEGER DEFAULT 0,policy INTEGER DEFAULT 0,completed INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS performance(
- id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,cycle TEXT,goals TEXT,rating REAL,manager_comments TEXT,status TEXT DEFAULT 'Open'
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,cycle TEXT,goals TEXT,rating REAL,manager_comments TEXT,status TEXT DEFAULT 'Open',
+ reviewer TEXT,finalized_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS increments(
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,cycle TEXT,rating REAL,percent REAL,
+ old_ctc REAL,new_ctc REAL,effective_date TEXT,applied_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS awards(
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,award_type TEXT DEFAULT 'Employee of the Month',
+ period TEXT,score REAL,note TEXT,declared_by TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(company_id,award_type,period)
 );
 CREATE TABLE IF NOT EXISTS assets(
  id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,asset_code TEXT,name TEXT,category TEXT,serial_no TEXT,status TEXT DEFAULT 'Available',
@@ -113,8 +124,11 @@ for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT"]){
 for(const col of ["email TEXT"]){
   try{await db.exec(`ALTER TABLE users ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT"]){
+for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT"]){
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
+}
+for(const col of ["reviewer TEXT","finalized_at TEXT","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
+  try{await db.exec(`ALTER TABLE performance ADD COLUMN ${col}`)}catch(e){}
 }
 for(const col of ["file_name TEXT","file_mime TEXT","file_data BYTEA","uploaded_by INTEGER","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
   try{await db.exec(`ALTER TABLE documents ADD COLUMN ${col}`)}catch(e){}
@@ -213,9 +227,21 @@ async function companySender(companyId){
 }
 function wrap(fn){return (req,res)=>fn(req,res).catch(e=>{console.error(e);res.status(500).json({error:e.message||"Server error"})})}
 
+const LOGIN_FAILS=new Map();
+const LOGIN_MAX=8,LOGIN_WINDOW=15*60*1000;
 app.post("/api/login",wrap(async(req,res)=>{
+  const key=(req.ip||"")+"|"+String(req.body.username||"").toLowerCase();
+  const now=Date.now();
+  const rec=LOGIN_FAILS.get(key);
+  if(rec && now-rec.first>LOGIN_WINDOW)LOGIN_FAILS.delete(key);
+  const cur=LOGIN_FAILS.get(key);
+  if(cur && cur.count>=LOGIN_MAX)return res.status(429).json({error:"Too many failed sign-in attempts. Please try again in 15 minutes."});
   const u=await db.prepare("SELECT * FROM users WHERE username=? AND active=1").get(req.body.username||"");
-  if(!u||!verify(req.body.password||"",u.password_hash))return res.status(401).json({error:"Invalid username or password"});
+  if(!u||!verify(req.body.password||"",u.password_hash)){
+    const f=LOGIN_FAILS.get(key)||{count:0,first:now};f.count++;LOGIN_FAILS.set(key,f);
+    return res.status(401).json({error:"Invalid username or password"});
+  }
+  LOGIN_FAILS.delete(key);
   const t=crypto.randomBytes(32).toString("hex");
   await db.prepare("INSERT INTO sessions(token,user_id,expires_at,active_company_id) VALUES(?,?,?,?)").run(t,u.id,Date.now()+8*60*60*1000,u.company_id||null);
   res.setHeader("Set-Cookie",`bms_session=${t}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${process.env.NODE_ENV==="production"?"; Secure":""}`);
@@ -702,16 +728,131 @@ app.post("/api/onboarding/:id",auth,requireCompany,roles("Super Admin","HR Admin
   if(r.changes===0)return res.status(404).json({error:"Record not found"});res.json({ok:true});
 }));
 
+async function isInTeam(req,employeeId){
+  if(req.user.role==="Manager" && req.user.employee_id){
+    const e=await db.prepare("SELECT reporting_manager_id FROM employees WHERE id=? AND company_id=?").get(employeeId,req.user.company_id);
+    return !!e && e.reporting_manager_id===req.user.employee_id;
+  }
+  return true;
+}
 app.get("/api/performance",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT p.*,e.employee_code,e.name FROM performance p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=?`;let p=[req.user.company_id];
-  if(req.user.role==="Employee"){q+=" AND e.id=?";p.push(req.user.employee_id)}q+=" ORDER BY p.id DESC";res.json(await db.prepare(q).all(...p));
+  if(req.user.role==="Employee"){q+=" AND e.id=? AND p.status='Finalized'";p.push(req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND e.reporting_manager_id=?";p.push(req.user.employee_id)}
+  q+=" ORDER BY p.id DESC";res.json(await db.prepare(q).all(...p));
 }));
 app.post("/api/performance",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>{
   const x=req.body;
   const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(x.employee_id,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const r=await db.prepare("INSERT INTO performance(company_id,employee_id,cycle,goals,rating,manager_comments,status) VALUES(?,?,?,?,?,?,?)").run(req.user.company_id,x.employee_id,x.cycle,x.goals,x.rating||0,x.manager_comments,x.status||"Open");
+  if(!await isInTeam(req,emp.id))return res.status(403).json({error:"You can only review employees who report to you"});
+  const rating=Number(x.rating);
+  if(!x.cycle||!String(x.cycle).trim())return res.status(400).json({error:"Review cycle is required (for example FY 2026-27)"});
+  if(!(rating>=1&&rating<=5))return res.status(400).json({error:"Rating must be between 1 and 5"});
+  const cycle=String(x.cycle).trim();
+  const existing=await db.prepare("SELECT id,status FROM performance WHERE employee_id=? AND cycle=? AND company_id=?").get(emp.id,cycle,req.user.company_id);
+  if(existing){
+    if(existing.status==="Finalized")return res.status(400).json({error:"This review is already finalized and cannot be changed"});
+    await db.prepare("UPDATE performance SET goals=?,rating=?,manager_comments=?,reviewer=? WHERE id=?").run(x.goals||"",rating,x.manager_comments||"",req.user.username,existing.id);
+    await audit(req,"UPDATE","PERFORMANCE",String(existing.id));
+    return res.json({id:existing.id,updated:true});
+  }
+  const r=await db.prepare("INSERT INTO performance(company_id,employee_id,cycle,goals,rating,manager_comments,status,reviewer) VALUES(?,?,?,?,?,?,?,?)").run(req.user.company_id,emp.id,cycle,x.goals||"",rating,x.manager_comments||"","Open",req.user.username);
+  await audit(req,"CREATE","PERFORMANCE",String(r.lastInsertRowid));
   res.json({id:r.lastInsertRowid});
+}));
+app.post("/api/performance/:id/finalize",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const r=await db.prepare("UPDATE performance SET status='Finalized',finalized_at=? WHERE id=? AND company_id=? AND status<>'Finalized'").run(new Date().toISOString(),req.params.id,req.user.company_id);
+  if(r.changes===0)return res.status(404).json({error:"Review not found or already finalized"});
+  await audit(req,"FINALIZE","PERFORMANCE",req.params.id);res.json({ok:true});
+}));
+
+/* ---------------- Yearly increment engine (rating -> % -> new CTC) ---------------- */
+const DEFAULT_SLABS=[{min:4.5,pct:15},{min:4,pct:12},{min:3.5,pct:9},{min:3,pct:6},{min:2,pct:3},{min:0,pct:0}];
+async function getSlabs(companyId){
+  const c=await db.prepare("SELECT increment_policy FROM companies WHERE id=?").get(companyId);
+  try{const s=JSON.parse(c?.increment_policy||"");if(Array.isArray(s)&&s.length)return s}catch{}
+  return DEFAULT_SLABS;
+}
+function pctFor(slabs,rating){
+  for(const s of [...slabs].sort((a,b)=>b.min-a.min)) if(rating>=s.min) return s.pct;
+  return 0;
+}
+app.get("/api/increment-policy",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  res.json({slabs:await getSlabs(req.user.company_id)});
+}));
+app.post("/api/increment-policy",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const slabs=req.body?.slabs;
+  if(!Array.isArray(slabs)||!slabs.length||slabs.length>10)return res.status(400).json({error:"Provide between 1 and 10 rating slabs"});
+  const clean=[];
+  for(const s of slabs){
+    const min=Number(s.min),pct=Number(s.pct);
+    if(!(min>=0&&min<=5)||!(pct>=0&&pct<=100))return res.status(400).json({error:"Each slab needs a minimum rating between 0 and 5 and a percentage between 0 and 100"});
+    clean.push({min,pct});
+  }
+  if(!clean.some(s=>s.min===0))clean.push({min:0,pct:0});
+  await db.prepare("UPDATE companies SET increment_policy=? WHERE id=?").run(JSON.stringify(clean),req.user.company_id);
+  await audit(req,"UPDATE","INCREMENT_POLICY","");res.json({ok:true});
+}));
+app.get("/api/increments/preview",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const cycle=String(req.query.cycle||"").trim();
+  if(!cycle)return res.status(400).json({error:"Review cycle is required"});
+  const slabs=await getSlabs(req.user.company_id);
+  const emps=await db.prepare("SELECT id,employee_code,name,department,designation,basic_salary,hra,other_allowances FROM employees WHERE company_id=? AND status='Active' ORDER BY name").all(req.user.company_id);
+  const ratings=await db.prepare("SELECT employee_id,AVG(rating) r,COUNT(*) n FROM performance WHERE company_id=? AND cycle=? AND status='Finalized' GROUP BY employee_id").all(req.user.company_id,cycle);
+  const rmap=Object.fromEntries(ratings.map(r=>[r.employee_id,Number(r.r)]));
+  const done=await db.prepare("SELECT employee_id FROM increments WHERE company_id=? AND cycle=?").all(req.user.company_id,cycle);
+  const doneSet=new Set(done.map(d=>d.employee_id));
+  res.json({cycle,slabs,rows:emps.map(e=>{
+    const ctc=(Number(e.basic_salary)||0)+(Number(e.hra)||0)+(Number(e.other_allowances)||0);
+    const rating=rmap[e.id]??null;
+    const pct=rating==null?0:pctFor(slabs,rating);
+    let note="";
+    if(doneSet.has(e.id))note="Already applied for this cycle";
+    else if(rating==null)note="No finalized review for this cycle";
+    else if(!ctc)note="Salary structure (CTC) not set";
+    return {employee_id:e.id,employee_code:e.employee_code,name:e.name,department:e.department,designation:e.designation,
+      rating:rating==null?null:+rating.toFixed(2),percent:pct,current_ctc:ctc,new_ctc:Math.round(ctc*(1+pct/100)),
+      applicable:!note,note};
+  })});
+}));
+app.post("/api/increments/apply",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const {cycle,effective_date,items}=req.body||{};
+  if(!cycle||!effective_date||!Array.isArray(items)||!items.length)return res.status(400).json({error:"Cycle, effective date and at least one employee are required"});
+  const company=await db.prepare("SELECT name,smtp_user,smtp_pass FROM companies WHERE id=?").get(req.user.company_id);
+  const inr=n=>"₹"+Number(n).toLocaleString("en-IN");
+  let applied=0,skipped=0;
+  for(const it of items){
+    const pct=Number(it.percent);
+    if(!(pct>0&&pct<=100)){skipped++;continue}
+    const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=? AND status='Active'").get(it.employee_id,req.user.company_id);
+    if(!emp){skipped++;continue}
+    if(await db.prepare("SELECT id FROM increments WHERE employee_id=? AND cycle=? AND company_id=?").get(emp.id,cycle,req.user.company_id)){skipped++;continue}
+    const basic=Number(emp.basic_salary)||0,hra=Number(emp.hra)||0,other=Number(emp.other_allowances)||0;
+    const oldCtc=basic+hra+other;
+    if(!oldCtc){skipped++;continue}
+    const f=1+pct/100;
+    const nb=Math.round(basic*f),nh=Math.round(hra*f),no=Math.round(other*f);
+    const rev=await db.prepare("SELECT AVG(rating) r FROM performance WHERE employee_id=? AND cycle=? AND status='Finalized'").get(emp.id,cycle);
+    await db.prepare("UPDATE employees SET basic_salary=?,hra=?,other_allowances=? WHERE id=?").run(nb,nh,no,emp.id);
+    await db.prepare("INSERT INTO increments(company_id,employee_id,cycle,rating,percent,old_ctc,new_ctc,effective_date,applied_by) VALUES(?,?,?,?,?,?,?,?,?)")
+      .run(req.user.company_id,emp.id,cycle,rev?.r!=null?Number(rev.r):null,pct,oldCtc,nb+nh+no,effective_date,req.user.username);
+    applied++;
+    if(emp.email){
+      sendMail(emp.email,`Salary revision — ${cycle}`,layout("Your salary revision",
+        `<p>Hi ${esc(emp.name)},</p><p>Based on your performance review for <b>${esc(cycle)}</b>, your salary has been revised by <b>${pct}%</b>, effective <b>${esc(effective_date)}</b>.</p>
+         <table style="width:100%;border-collapse:collapse;margin-top:10px">
+         <tr><td style="padding:6px;border:1px solid #e5e7eb">Previous monthly CTC</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(oldCtc)}</td></tr>
+         <tr><td style="padding:6px;border:1px solid #e5e7eb"><b>Revised monthly CTC</b></td><td style="padding:6px;border:1px solid #e5e7eb"><b>${inr(nb+nh+no)}</b></td></tr></table>
+         <p style="font-size:12px;color:#64748b">Congratulations and thank you for your contribution.</p>`),
+        {smtp_user:company?.smtp_user,smtp_pass:company?.smtp_pass,name:company?.name}).catch(()=>{});
+    }
+  }
+  await audit(req,"APPLY","INCREMENT",`${cycle}: ${applied} applied, ${skipped} skipped`);
+  res.json({ok:true,applied,skipped});
+}));
+app.get("/api/increments",auth,requireCompany,roles("Super Admin","HR Admin","Director","Finance"),wrap(async(req,res)=>{
+  res.json(await db.prepare(`SELECT i.*,e.employee_code,e.name FROM increments i JOIN employees e ON e.id=i.employee_id WHERE i.company_id=? ORDER BY i.id DESC LIMIT 500`).all(req.user.company_id));
 }));
 
 app.get("/api/assets",auth,requireCompany,wrap(async(req,res)=>res.json(await db.prepare(`SELECT a.*,e.name employee_name,e.employee_code FROM assets a LEFT JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY a.id DESC`).all(req.user.company_id))));
@@ -769,16 +910,161 @@ app.post("/api/documents",auth,requireCompany,wrap(async(req,res)=>{
 }));
 
 app.get("/api/announcements",auth,requireCompany,wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM announcements WHERE company_id=? ORDER BY id DESC").all(req.user.company_id))));
-app.post("/api/announcements",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
-  const x=req.body;const r=await db.prepare("INSERT INTO announcements(company_id,title,body,audience) VALUES(?,?,?,?)").run(req.user.company_id,x.title,x.body,x.audience||"All");
-  res.json({id:r.lastInsertRowid});
+async function publishAnnouncement(companyId,title,body,audience="All"){
+  const r=await db.prepare("INSERT INTO announcements(company_id,title,body,audience) VALUES(?,?,?,?)").run(companyId,title,body,audience);
   (async()=>{
-    const emails=(await db.prepare("SELECT DISTINCT email FROM employees WHERE company_id=? AND status='Active' AND email IS NOT NULL AND email<>''").all(req.user.company_id)).map(r=>r.email);
+    const emails=(await db.prepare("SELECT DISTINCT email FROM employees WHERE company_id=? AND status='Active' AND email IS NOT NULL AND email<>''").all(companyId)).map(r=>r.email);
     if(!emails.length)return;
-    const sender=await companySender(req.user.company_id);
-    const html=layout(x.title,`<p>${(x.body||"").replace(/\n/g,"<br>")}</p><p style="font-size:12px;color:#64748b">Audience: ${x.audience||"All"}</p>`);
-    for(const email of emails) await sendMail(email,`Announcement: ${x.title}`,html,sender);
+    const sender=await companySender(companyId);
+    const html=layout(title,`<p>${esc(body||"").replace(/\n/g,"<br>")}</p><p style="font-size:12px;color:#64748b">Audience: ${esc(audience)}</p>`);
+    for(const email of emails) await sendMail(email,`Announcement: ${title}`,html,sender);
   })().catch(e=>console.error("Announcement email batch failed:",e.message));
+  return r.lastInsertRowid;
+}
+app.post("/api/announcements",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const x=req.body;
+  if(!x.title||!String(x.title).trim())return res.status(400).json({error:"Title is required"});
+  const id=await publishAnnouncement(req.user.company_id,String(x.title).trim(),x.body||"",x.audience||"All");
+  res.json({id});
+}));
+
+/* ---------------- Employee of the Month (data-driven suggestion) ---------------- */
+const OFFICE_START_MIN=9*60+30, GRACE_MIN=15;
+function lateFromFirstIn(firstIn){
+  if(!firstIn||firstIn.length<16)return false;
+  const hh=Number(firstIn.slice(11,13)),mm=Number(firstIn.slice(14,16));
+  if(isNaN(hh)||isNaN(mm))return false;
+  return hh*60+mm>OFFICE_START_MIN+GRACE_MIN;
+}
+async function computeEom(companyId,month){
+  const [y,m]=month.split("-").map(Number);
+  const daysInMonth=new Date(y,m,0).getDate();
+  const now=new Date();
+  const isCurrent=now.getFullYear()===y&&now.getMonth()+1===m;
+  const elapsed=isCurrent?now.getDate():daysInMonth;
+  let workingDays=0;
+  for(let d=1;d<=elapsed;d++) if(new Date(y,m-1,d).getDay()!==0) workingDays++;
+  const monthEnd=`${month}-${String(daysInMonth).padStart(2,"0")}`;
+  const emps=await db.prepare("SELECT id,employee_code,name,department,designation,joining_date FROM employees WHERE company_id=? AND status='Active'").all(companyId);
+  const att=await db.prepare("SELECT employee_id,status,first_in FROM attendance WHERE company_id=? AND work_date LIKE ?").all(companyId,month+"%");
+  const leaves=await db.prepare("SELECT employee_id,COALESCE(SUM(days),0) d FROM leave_requests WHERE company_id=? AND status='Approved' AND category='Leave' AND from_date LIKE ? GROUP BY employee_id").all(companyId,month+"%");
+  const leaveMap=Object.fromEntries(leaves.map(l=>[l.employee_id,Number(l.d)]));
+  const reviews=await db.prepare("SELECT employee_id,rating,cycle FROM performance WHERE company_id=? AND status='Finalized' ORDER BY finalized_at DESC NULLS LAST,id DESC").all(companyId);
+  const latestRating={};
+  for(const r of reviews) if(latestRating[r.employee_id]==null) latestRating[r.employee_id]={rating:Number(r.rating),cycle:r.cycle};
+  const prevMonths=[];
+  for(let i=1;i<=3;i++){const d=new Date(y,m-1-i,1);prevMonths.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`)}
+  const recent=await db.prepare("SELECT employee_id FROM awards WHERE company_id=? AND award_type='Employee of the Month' AND period=ANY(?)").all(companyId,prevMonths);
+  const recentSet=new Set(recent.map(r=>r.employee_id));
+  const byEmp={};
+  for(const a of att){(byEmp[a.employee_id]=byEmp[a.employee_id]||[]).push(a)}
+  const out=[];
+  for(const e of emps){
+    if(e.joining_date && e.joining_date>monthEnd) continue;
+    const rows=byEmp[e.id]||[];
+    const present=rows.filter(r=>r.status==="Present");
+    const half=rows.filter(r=>r.status==="Half Day").length;
+    const presentEq=present.length+half*0.5;
+    const eligible=Math.max(1,workingDays-(leaveMap[e.id]||0));
+    const attendance=Math.min(1,presentEq/eligible);
+    const lateDays=present.filter(r=>lateFromFirstIn(r.first_in)).length;
+    const punctuality=present.length?1-lateDays/present.length:0;
+    const rv=latestRating[e.id];
+    const perf=rv?rv.rating/5:null;
+    const wP=perf==null?0:0.4,wA=perf==null?0.58:0.35,wT=perf==null?0.42:0.25;
+    const score=+((100*(wP*(perf||0)+wA*attendance+wT*punctuality))).toFixed(1);
+    const reasons=[`${Math.round(attendance*100)}% attendance (${presentEq} of ${eligible} working days)`,`${lateDays} late arrival${lateDays===1?"":"s"}`];
+    reasons.push(rv?`Latest review rating ${rv.rating.toFixed(1)}/5 (${rv.cycle})`:"No finalized performance review");
+    out.push({employee_id:e.id,employee_code:e.employee_code,name:e.name,department:e.department,designation:e.designation,
+      score,attendance_pct:Math.round(attendance*100),late_days:lateDays,rating:rv?rv.rating:null,
+      has_attendance_data:rows.length>0,recent_winner:recentSet.has(e.id),reasons});
+  }
+  out.sort((a,b)=>b.score-a.score);
+  return {month,working_days:workingDays,candidates:out};
+}
+app.get("/api/eom",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const month=req.query.month||new Date().toISOString().slice(0,7);
+  if(!/^\d{4}-\d{2}$/.test(month))return res.status(400).json({error:"Month must be in YYYY-MM format"});
+  const r=await computeEom(req.user.company_id,month);
+  const declared=await db.prepare("SELECT a.*,e.name,e.employee_code FROM awards a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? AND a.award_type='Employee of the Month' AND a.period=?").get(req.user.company_id,month);
+  res.json({...r,candidates:r.candidates.slice(0,10),declared:declared||null});
+}));
+app.post("/api/eom/declare",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const {month,employee_id,note}=req.body||{};
+  if(!/^\d{4}-\d{2}$/.test(month||""))return res.status(400).json({error:"Month must be in YYYY-MM format"});
+  const emp=await db.prepare("SELECT id,name FROM employees WHERE id=? AND company_id=? AND status='Active'").get(employee_id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
+  if(await db.prepare("SELECT id FROM awards WHERE company_id=? AND award_type='Employee of the Month' AND period=?").get(req.user.company_id,month))
+    return res.status(400).json({error:"Employee of the Month is already declared for this month"});
+  const r=await computeEom(req.user.company_id,month);
+  const c=r.candidates.find(x=>x.employee_id===emp.id);
+  await db.prepare("INSERT INTO awards(company_id,employee_id,award_type,period,score,note,declared_by) VALUES(?,?,?,?,?,?,?)")
+    .run(req.user.company_id,emp.id,"Employee of the Month",month,c?c.score:null,note||"",req.user.username);
+  const label=new Date(month+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
+  await publishAnnouncement(req.user.company_id,`Employee of the Month — ${label}`,`Congratulations to ${emp.name} for being recognised as Employee of the Month for ${label}.${note?"\n\n"+note:""}`,"All");
+  await audit(req,"DECLARE","EOM",`${month}: ${emp.name}`);
+  res.json({ok:true});
+}));
+/* ---------------- MIS (management information) ---------------- */
+app.get("/api/mis",auth,requireCompany,roles("Super Admin","HR Admin","Director","Finance"),wrap(async(req,res)=>{
+  const cid=req.user.company_id;
+  const month=req.query.month||new Date().toISOString().slice(0,7);
+  if(!/^\d{4}-\d{2}$/.test(month))return res.status(400).json({error:"Month must be in YYYY-MM format"});
+  const N=v=>Number(v)||0;
+  const dept="COALESCE(NULLIF(e.department,''),'Unassigned')";
+  const today=new Date();
+  const d30=new Date(today.getTime()-30*86400000).toISOString().slice(0,10);
+  const d365=new Date(today.getTime()-365*86400000).toISOString().slice(0,10);
+
+  const headcount=await db.prepare("SELECT status,COUNT(*) c FROM employees WHERE company_id=? GROUP BY status").all(cid);
+  const active=N(headcount.find(h=>h.status==="Active")?.c);
+  const byDept=(await db.prepare(`SELECT ${dept} department,COUNT(*) c FROM employees e WHERE e.company_id=? AND e.status='Active' GROUP BY 1 ORDER BY 2 DESC`).all(cid)).map(r=>({department:r.department,count:N(r.c)}));
+  const newJoiners=N((await db.prepare("SELECT COUNT(*) c FROM employees WHERE company_id=? AND status='Active' AND joining_date>=?").get(cid,d30)).c);
+  const exits12=N((await db.prepare("SELECT COUNT(*) c FROM exit_requests WHERE company_id=? AND status='Approved' AND last_working_date>=?").get(cid,d365)).c);
+  const openExits=N((await db.prepare("SELECT COUNT(*) c FROM exit_requests WHERE company_id=? AND status='Pending'").get(cid)).c);
+
+  const attRows=await db.prepare(`SELECT ${dept} department,a.status,a.first_in FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? AND a.work_date LIKE ?`).all(cid,month+"%");
+  const attDept={};
+  let tPresent=0,tAbsent=0,tHalf=0,tLate=0;
+  for(const r of attRows){
+    const d=attDept[r.department]=attDept[r.department]||{department:r.department,present:0,absent:0,half_day:0,late:0};
+    if(r.status==="Present"){d.present++;tPresent++;if(lateFromFirstIn(r.first_in)){d.late++;tLate++}}
+    else if(r.status==="Absent"){d.absent++;tAbsent++}
+    else if(r.status==="Half Day"){d.half_day++;tHalf++}
+  }
+
+  const leaveByType=(await db.prepare("SELECT leave_type,COALESCE(SUM(days),0) d FROM leave_requests WHERE company_id=? AND status='Approved' AND category='Leave' AND from_date LIKE ? GROUP BY leave_type ORDER BY 2 DESC").all(cid,month+"%")).map(r=>({leave_type:r.leave_type,days:N(r.d)}));
+  const wfhDays=N((await db.prepare("SELECT COALESCE(SUM(days),0) d FROM leave_requests WHERE company_id=? AND status='Approved' AND category='WFH' AND from_date LIKE ?").get(cid,month+"%")).d);
+  const pendingApprovals=N((await db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE company_id=? AND status='Pending'").get(cid)).c);
+
+  const pay=await db.prepare("SELECT COUNT(*) n,COALESCE(SUM(gross),0) gross,COALESCE(SUM(net),0) net,COALESCE(SUM(pf_employee),0) pf,COALESCE(SUM(esic_employee),0) esic,COALESCE(SUM(tds),0) tds,COALESCE(SUM(lop),0) lop FROM payroll WHERE company_id=? AND month=?").get(cid,month);
+  const payDept=(await db.prepare(`SELECT ${dept} department,COALESCE(SUM(p.net),0) net FROM payroll p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=? AND p.month=? GROUP BY 1 ORDER BY 2 DESC`).all(cid,month)).map(r=>({department:r.department,net:N(r.net)}));
+  const payTrend=(await db.prepare("SELECT month,COALESCE(SUM(net),0) net,COALESCE(SUM(gross),0) gross FROM payroll WHERE company_id=? GROUP BY month ORDER BY month DESC LIMIT 6").all(cid)).reverse().map(r=>({month:r.month,net:N(r.net),gross:N(r.gross)}));
+
+  const cand=(await db.prepare("SELECT status,COUNT(*) c FROM candidates WHERE company_id=? GROUP BY status").all(cid)).map(r=>({status:r.status,count:N(r.c)}));
+  const expStatus=(await db.prepare("SELECT status,COUNT(*) c,COALESCE(SUM(amount),0) a FROM expenses WHERE company_id=? AND expense_date LIKE ? GROUP BY status").all(cid,month+"%")).map(r=>({status:r.status,count:N(r.c),amount:N(r.a)}));
+  const expCat=(await db.prepare("SELECT COALESCE(NULLIF(category,''),'Other') category,COALESCE(SUM(amount),0) a FROM expenses WHERE company_id=? AND expense_date LIKE ? GROUP BY 1 ORDER BY 2 DESC").all(cid,month+"%")).map(r=>({category:r.category,amount:N(r.a)}));
+
+  const ratings=(await db.prepare("SELECT rating FROM performance WHERE company_id=? AND status='Finalized'").all(cid)).map(r=>Number(r.rating));
+  const dist=[{label:"Below 2",count:0},{label:"2 to 3",count:0},{label:"3 to 4",count:0},{label:"4 to 5",count:0}];
+  for(const r of ratings){dist[r<2?0:r<3?1:r<4?2:3].count++}
+  const openTickets=N((await db.prepare("SELECT COUNT(*) c FROM tickets WHERE company_id=? AND status<>'Closed'").get(cid)).c);
+  const assets=(await db.prepare("SELECT status,COUNT(*) c FROM assets WHERE company_id=? GROUP BY status").all(cid)).map(r=>({status:r.status,count:N(r.c)}));
+
+  res.json({month,
+    headcount:{active,inactive:N(headcount.find(h=>h.status==="Inactive")?.c),byDepartment:byDept,newJoiners30:newJoiners,exits12m:exits12,pendingExits:openExits,
+      attritionPct:active+exits12?+(exits12/(active+exits12)*100).toFixed(1):0},
+    attendance:{present:tPresent,absent:tAbsent,halfDay:tHalf,late:tLate,byDepartment:Object.values(attDept)},
+    leave:{byType:leaveByType,wfhDays,pendingApprovals},
+    payroll:{processed:N(pay.n),gross:N(pay.gross),net:N(pay.net),pf:N(pay.pf),esic:N(pay.esic),tds:N(pay.tds),lop:N(pay.lop),byDepartment:payDept,trend:payTrend},
+    recruitment:cand,
+    expenses:{byStatus:expStatus,byCategory:expCat},
+    performance:{reviews:ratings.length,average:ratings.length?+(ratings.reduce((a,b)=>a+b,0)/ratings.length).toFixed(2):null,distribution:dist},
+    helpdesk:{open:openTickets},assets});
+}));
+
+app.get("/api/awards",auth,requireCompany,wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT a.*,e.name,e.employee_code,e.department FROM awards a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY a.period DESC LIMIT 24").all(req.user.company_id));
 }));
 
 app.get("/api/tickets",auth,requireCompany,wrap(async(req,res)=>{
@@ -915,6 +1201,94 @@ app.post("/api/biometric/ingest",wrap(async(req,res)=>{
   await db.prepare("INSERT INTO audit_logs(company_id,user_id,action,module,details) VALUES(?,?,?,?,?)")
     .run(device.company_id,null,"SYNC","BIOMETRIC",`${device.name} (agent push): ${records.length} logs, ${matched} matched, ${unmatched} unmatched biometric IDs`);
   res.json({ok:true,received:records.length,matched,unmatched});
+}));
+
+/* ---------------- Data export (Excel / CSV) ---------------- */
+function safeCell(v){
+  if(v==null)return "";
+  if(typeof v==="number")return v;
+  const s=String(v);
+  return /^[=+\-@\t\r]/.test(s)?"'"+s:s; // neutralise spreadsheet formula injection
+}
+async function sendTable(res,format,filename,columns,rows){
+  const data=rows.map(r=>Object.fromEntries(columns.map(c=>[c.key,safeCell(c.fmt?c.fmt(r[c.key],r):r[c.key])])));
+  if(format==="csv"){
+    const q=v=>{const s=String(v);return /[",\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s};
+    const lines=[columns.map(c=>q(c.header)).join(","),...data.map(r=>columns.map(c=>q(r[c.key])).join(","))];
+    res.setHeader("Content-Type","text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition",`attachment; filename="${filename}.csv"`);
+    return res.send("﻿"+lines.join("\r\n"));
+  }
+  const wb=new ExcelJS.Workbook();
+  const ws=wb.addWorksheet("Data");
+  ws.columns=columns.map(c=>({header:c.header,key:c.key,width:c.width||18}));
+  ws.addRows(data);
+  const head=ws.getRow(1);
+  head.font={bold:true,color:{argb:"FFFFFFFF"}};
+  head.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF4F46E5"}};
+  head.alignment={vertical:"middle"};
+  ws.views=[{state:"frozen",ySplit:1}];
+  ws.autoFilter={from:{row:1,column:1},to:{row:1,column:columns.length}};
+  res.setHeader("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition",`attachment; filename="${filename}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+}
+const yn=v=>v?"Yes":"No";
+const HR_ROLES=["Super Admin","HR Admin","Director"];
+const teamFilter=(req,q,p,alias="e")=>{
+  if(req.user.role==="Manager"&&req.user.employee_id){q+=` AND (${alias}.reporting_manager_id=? OR ${alias}.id=?)`;p.push(req.user.employee_id,req.user.employee_id)}
+  return q;
+};
+const EXPORTS={
+  employees:{roles:[...HR_ROLES,"Finance","Manager"],
+    columns:req=>{
+      const base=[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Email",key:"email",width:28},{header:"Phone",key:"phone"},{header:"Department",key:"department"},{header:"Designation",key:"designation"},{header:"Reporting Manager",key:"reporting_manager",width:24},{header:"Branch",key:"branch"},{header:"Joining Date",key:"joining_date"},{header:"Status",key:"status"}];
+      if(req.user.role==="Manager")return base;
+      return [...base,{header:"Date of Birth",key:"date_of_birth"},{header:"Biometric ID",key:"biometric_id"},{header:"Basic (monthly)",key:"basic_salary"},{header:"HRA (monthly)",key:"hra"},{header:"Other Allowances (monthly)",key:"other_allowances",width:24},
+        {header:"PF Applicable",key:"pf_applicable",fmt:yn},{header:"ESIC Applicable",key:"esic_applicable",fmt:yn},{header:"PF Number",key:"pf_number"},{header:"UAN",key:"uan_number"},{header:"ESIC Number",key:"esic_number"},{header:"PAN",key:"pan_number"},
+        {header:"Bank Name",key:"bank_name"},{header:"Bank Account",key:"bank_account",width:22},{header:"IFSC",key:"ifsc"}];
+    },
+    query:req=>{let p=[req.user.company_id];let q="SELECT e.*,m.name reporting_manager FROM employees e LEFT JOIN employees m ON m.id=e.reporting_manager_id WHERE e.company_id=?";q=teamFilter(req,q,p);return [q+" ORDER BY e.employee_code",p]}},
+  attendance:{roles:[...HR_ROLES,"Manager"],
+    columns:()=>[{header:"Date",key:"work_date"},{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Department",key:"department"},{header:"First In",key:"first_in",width:22},{header:"Last Out",key:"last_out",width:22},{header:"Status",key:"status"},{header:"Late (min)",key:"late_minutes"},{header:"Source",key:"source"}],
+    query:req=>{let p=[req.user.company_id];let q="SELECT a.*,e.employee_code,e.name,e.department FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=?";
+      if(req.query.from){q+=" AND a.work_date>=?";p.push(req.query.from)}if(req.query.to){q+=" AND a.work_date<=?";p.push(req.query.to)}
+      q=teamFilter(req,q,p);return [q+" ORDER BY a.work_date DESC,e.employee_code",p]}},
+  leaves:{roles:[...HR_ROLES,"Manager"],
+    columns:()=>[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Category",key:"category"},{header:"Leave Type",key:"leave_type",width:22},{header:"From",key:"from_date"},{header:"To",key:"to_date"},{header:"Days",key:"days"},{header:"Status",key:"status"},{header:"Approved By",key:"approved_by"},{header:"Reason",key:"reason",width:34}],
+    query:req=>{let p=[req.user.company_id];let q="SELECT l.*,e.employee_code,e.name FROM leave_requests l JOIN employees e ON e.id=l.employee_id WHERE l.company_id=?";q=teamFilter(req,q,p);return [q+" ORDER BY l.id DESC",p]}},
+  payroll:{roles:[...HR_ROLES,"Finance"],
+    columns:()=>[{header:"Month",key:"month"},{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Gross",key:"gross"},{header:"LOP Days",key:"lop_days"},{header:"LOP Amount",key:"lop"},{header:"PF (Employee)",key:"pf_employee"},{header:"ESIC (Employee)",key:"esic_employee"},{header:"TDS",key:"tds"},{header:"Other Deductions",key:"deductions"},{header:"Overtime",key:"ot"},{header:"Net Pay",key:"net"},{header:"Status",key:"status"},{header:"Payslip No",key:"payslip_no",width:24},{header:"Bank Name",key:"bank_name"},{header:"Bank Account",key:"bank_account",width:22},{header:"IFSC",key:"ifsc"}],
+    query:req=>{let p=[req.user.company_id];let q="SELECT p.*,e.employee_code,e.name,e.bank_name,e.bank_account,e.ifsc FROM payroll p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=?";
+      if(req.query.month){q+=" AND p.month=?";p.push(req.query.month)}return [q+" ORDER BY p.month DESC,e.employee_code",p]}},
+  expenses:{roles:[...HR_ROLES,"Finance","Manager"],
+    columns:()=>[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"employee_name",width:26},{header:"Category",key:"category"},{header:"Amount",key:"amount"},{header:"Date",key:"expense_date"},{header:"Description",key:"description",width:36},{header:"Status",key:"status"}],
+    query:req=>{let p=[req.user.company_id];let q="SELECT x.*,e.name employee_name,e.employee_code FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?";q=teamFilter(req,q,p);return [q+" ORDER BY x.id DESC",p]}},
+  performance:{roles:[...HR_ROLES,"Manager"],
+    columns:()=>[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Cycle",key:"cycle"},{header:"Rating (1-5)",key:"rating"},{header:"Status",key:"status"},{header:"Reviewer",key:"reviewer"},{header:"Goals / KRA",key:"goals",width:40},{header:"Manager Comments",key:"manager_comments",width:40}],
+    query:req=>{let p=[req.user.company_id];let q="SELECT p.*,e.employee_code,e.name FROM performance p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=?";
+      if(req.user.role==="Manager"&&req.user.employee_id){q+=" AND e.reporting_manager_id=?";p.push(req.user.employee_id)}return [q+" ORDER BY p.id DESC",p]}},
+  candidates:{roles:[...HR_ROLES,"Manager"],
+    columns:()=>[{header:"Name",key:"name",width:26},{header:"Email",key:"email",width:28},{header:"Phone",key:"phone"},{header:"Position",key:"position",width:24},{header:"Status",key:"status"},{header:"Interview Date",key:"interview_date"},{header:"Notes",key:"notes",width:40}],
+    query:req=>["SELECT * FROM candidates WHERE company_id=? ORDER BY id DESC",[req.user.company_id]]},
+  assets:{roles:HR_ROLES,
+    columns:()=>[{header:"Asset Code",key:"asset_code"},{header:"Asset",key:"name",width:26},{header:"Category",key:"category"},{header:"Serial No",key:"serial_no"},{header:"Status",key:"status"},{header:"Assigned To",key:"employee_name",width:26},{header:"Issued Date",key:"issued_date"}],
+    query:req=>["SELECT a.*,e.name employee_name FROM assets a LEFT JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY a.id DESC",[req.user.company_id]]},
+  increments:{roles:[...HR_ROLES,"Finance"],
+    columns:()=>[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Cycle",key:"cycle"},{header:"Rating",key:"rating"},{header:"Increment %",key:"percent"},{header:"Old Monthly CTC",key:"old_ctc"},{header:"New Monthly CTC",key:"new_ctc"},{header:"Effective Date",key:"effective_date"},{header:"Applied By",key:"applied_by"}],
+    query:req=>["SELECT i.*,e.employee_code,e.name FROM increments i JOIN employees e ON e.id=i.employee_id WHERE i.company_id=? ORDER BY i.id DESC",[req.user.company_id]]}
+};
+app.get("/api/export/:dataset",auth,requireCompany,wrap(async(req,res)=>{
+  const cfg=EXPORTS[req.params.dataset];
+  if(!cfg)return res.status(404).json({error:"Unknown dataset"});
+  if(!cfg.roles.includes(req.user.role))return res.status(403).json({error:"You do not have permission to download this data"});
+  const [sql,params]=cfg.query(req);
+  const rows=await db.prepare(sql).all(...params);
+  const company=await db.prepare("SELECT code FROM companies WHERE id=?").get(req.user.company_id);
+  const format=req.query.format==="csv"?"csv":"xlsx";
+  await audit(req,"EXPORT","DATA",`${req.params.dataset} (${rows.length} rows, ${format})`);
+  await sendTable(res,format,`${(company?.code||"company").toLowerCase()}_${req.params.dataset}_${new Date().toISOString().slice(0,10)}`,cfg.columns(req),rows);
 }));
 
 app.get("/api/audit",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>res.json(await db.prepare(`SELECT a.*,u.username FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE a.company_id=? ORDER BY a.id DESC LIMIT 300`).all(req.user.company_id))));
