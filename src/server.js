@@ -500,7 +500,8 @@ app.get("/api/dashboard",auth,wrap(async(req,res)=>{
 }));
 
 app.get("/api/employees",auth,requireCompany,wrap(async(req,res)=>{
-  let rows=await db.prepare("SELECT * FROM employees WHERE company_id=? ORDER BY id DESC").all(req.user.company_id);
+  let rows=await db.prepare("SELECT e.*,(SELECT u.username FROM users u WHERE u.employee_id=e.id AND u.company_id=e.company_id ORDER BY u.id LIMIT 1) AS login_username FROM employees e WHERE e.company_id=? ORDER BY e.id DESC").all(req.user.company_id);
+  if(!["Super Admin","HR Admin"].includes(req.user.role))rows=rows.map(({login_username,...r})=>r);
   if(req.user.role==="Employee") rows=rows.filter(x=>x.id===req.user.employee_id);
   else if(req.user.role==="Manager" && req.user.employee_id) rows=rows.filter(x=>x.reporting_manager_id===req.user.employee_id || x.id===req.user.employee_id);
   res.json(rows);
@@ -549,6 +550,25 @@ app.post("/api/employees/:id/status",auth,requireCompany,roles("Super Admin","HR
   if(r.changes===0)return res.status(404).json({error:"Employee not found"});
   await audit(req,"STATUS","EMPLOYEE",req.params.id+":"+req.body.status);res.json({ok:true});
 }));
+// HR resets an employee's own login: a new temporary password is generated, shown to HR and emailed when possible.
+app.post("/api/employees/:id/reset-login",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found"});
+  const u=await db.prepare("SELECT id,username,role FROM users WHERE employee_id=? AND company_id=? ORDER BY id LIMIT 1").get(emp.id,req.user.company_id);
+  if(!u)return res.status(404).json({error:"This employee does not have a login yet"});
+  if(u.role!=="Employee")return res.status(400).json({error:"Use the Team page for management logins"});
+  const tempPassword=crypto.randomBytes(6).toString("base64").replace(/[^a-zA-Z0-9]/g,"").slice(0,10)+"@1";
+  await db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(hash(tempPassword,crypto.randomBytes(16).toString("hex")),u.id);
+  await db.prepare("DELETE FROM sessions WHERE user_id=?").run(u.id);
+  await audit(req,"RESET_PASSWORD","EMPLOYEE",u.username);
+  let emailed=false;
+  if(emp.email){
+    const r=await sendMailEx(emp.email,"Your HR portal password was reset",layout("Password reset",
+      `<p>Hi ${esc2(emp.name)},</p><p>Your password was reset by HR.</p><p><b>Login URL:</b> ${req.protocol}://${req.get("host")}<br><b>Username:</b> ${esc2(u.username)}<br><b>Temporary Password:</b> ${esc2(tempPassword)}</p><p>Please sign in and change your password.</p>`),await companySender(req.user.company_id));
+    emailed=r.ok;
+  }
+  res.json({ok:true,username:u.username,temp_password:tempPassword,emailed});
+}));
 app.post("/api/employees/:id/create-login",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found"});
@@ -562,14 +582,16 @@ app.post("/api/employees/:id/create-login",auth,requireCompany,roles("Super Admi
   await db.prepare("INSERT INTO users(company_id,username,password_hash,role,employee_id,email) VALUES(?,?,?,?,?,?)")
     .run(req.user.company_id,username,hash(tempPassword,s),"Employee",emp.id,emp.email||null);
   await audit(req,"CREATE_LOGIN","EMPLOYEE",username);
+  let emailed=false,emailError=null;
   if(emp.email){
-    sendMail(emp.email,"Your BMS HRMS login",layout("Welcome aboard!",
-      `<p>Hi ${emp.name},</p><p>Your employee self-service login has been created.</p>
-       <p><b>Login URL:</b> ${req.protocol}://${req.get("host")}<br><b>Username:</b> ${username}<br><b>Temporary Password:</b> ${tempPassword}</p>
+    const r=await sendMailEx(emp.email,"Your HR portal login",layout("Welcome aboard!",
+      `<p>Hi ${esc2(emp.name)},</p><p>Your employee self-service login has been created.</p>
+       <p><b>Login URL:</b> ${req.protocol}://${req.get("host")}<br><b>Username:</b> ${esc2(username)}<br><b>Temporary Password:</b> ${esc2(tempPassword)}</p>
        <p>Please log in and change your password from the header menu.</p>`),
-      await companySender(req.user.company_id)).catch(()=>{});
+      await companySender(req.user.company_id));
+    emailed=r.ok;emailError=r.error;
   }
-  res.json({ok:true,username,temp_password:tempPassword,emailed:!!emp.email});
+  res.json({ok:true,username,temp_password:tempPassword,emailed,emailError,hasEmail:!!emp.email});
 }));
 app.post("/api/change-password",auth,wrap(async(req,res)=>{
   const u=await db.prepare("SELECT * FROM users WHERE id=?").get(req.user.id);
@@ -596,7 +618,7 @@ app.post("/api/forgot-password",wrap(async(req,res)=>{
       sendMail(email,"Reset your BMS HRMS password",layout("Password reset requested",
         `<p>Hi ${u.username},</p><p>Click the link below to reset your password. This link expires in 30 minutes.</p>
          <p><a href="${link}" style="background:#4f46e5;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;display:inline-block">Reset Password</a></p>
-         <p style="font-size:12px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>`)).catch(()=>{});
+         <p style="font-size:12px;color:#64748b">If you didn't request this, you can safely ignore this email.</p>`),u.company_id?await companySender(u.company_id):undefined).catch(()=>{});
     }
   }
   res.json({ok:true});

@@ -911,20 +911,25 @@ async function toggleEmpStatus(id,cur){
   if(!await uiConfirm(`Mark this employee as ${ns}?`,{title:ns==="Inactive"?"Deactivate employee":"Activate employee",okText:ns==="Inactive"?"Deactivate":"Activate",danger:ns==="Inactive"}))return;
   try{await api("/api/employees/"+id+"/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:ns})});loadPage("employees")}catch(e){alert(e.message)}
 }
+function loginResult(r,what){
+  const mail=r.emailed?"The login details were also emailed to the employee.":(r.hasEmail===false?"There is no email address on file, so please share the details yourself.":"The email could not be sent"+(r.emailError?` (${r.emailError})`:"")+". Please share the details yourself.");
+  return uiAlert(`${what}\n\nUsername: ${r.username}\nTemporary password: ${r.temp_password}\n\n${mail}`);
+}
 async function createLogin(id){
   if(!await uiConfirm("Create a self-service login for this employee? A temporary password will be generated and emailed to them if an email address is on file.",{title:"Create employee login",okText:"Create Login"}))return;
-  try{
-    const r=await api(`/api/employees/${id}/create-login`,{method:"POST"});
-    alert(r.emailed?`Login created and emailed to the employee.\nUsername: ${r.username}`:`Login created.\nUsername: ${r.username}\nTemporary Password: ${r.temp_password}\n(No email on file — share these credentials manually.)`);
-  }catch(e){alert(e.message)}
+  try{const r=await api(`/api/employees/${id}/create-login`,{method:"POST"});await loginResult(r,"Login created.");loadPage("employees")}catch(e){uiAlert(e.message)}
+}
+async function resetEmpLogin(id){
+  if(!await uiConfirm("Reset this employee's password? A new temporary password is generated and the employee is signed out.",{title:"Reset password",okText:"Reset"}))return;
+  try{const r=await api(`/api/employees/${id}/reset-login`,{method:"POST"});await loginResult(r,"Password reset.")}catch(e){uiAlert(e.message)}
 }
 function renderEmployees(){
   if(needsCompany("empTable"))return;
   const q=$("empSearch").value;
   const rows=filterRows(PAGEDATA.employees||[],["employee_code","name","department","designation","branch"],q);
   $("empCount").textContent=`(${rows.length} of ${(PAGEDATA.employees||[]).length})`;
-  table("empTable",["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),`<div style="display:flex;align-items:center;gap:8px">${empAvatar(e)}${esc(e.name)}</div>`,esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),statusBadge(e.status),
-    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="changeEmpPhoto(${e.id})">Photo</button><button class="sm gray" onclick="openEmpTiming(${e.id})">Timing</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button><button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
+  table("empTable",isHR()?["Code","Name","Dept","Designation","Branch","Biometric","Login","Status","Action"]:["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),`<div style="display:flex;align-items:center;gap:8px">${empAvatar(e)}${esc(e.name)}</div>`,esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),...(isHR()?[e.login_username?`<span class="chip">${esc(e.login_username)}</span>`:`<span class="small">No login</span>`]:[]),statusBadge(e.status),
+    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="changeEmpPhoto(${e.id})">Photo</button><button class="sm gray" onclick="openEmpTiming(${e.id})">Timing</button>${e.login_username?`<button class="sm gray" onclick="resetEmpLogin(${e.id})">Reset password</button>`:`<button class="sm gray" onclick="createLogin(${e.id})">Create Login</button>`}<button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
 }
 
 /* ---------- Attendance ---------- */
