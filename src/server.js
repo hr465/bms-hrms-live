@@ -887,7 +887,7 @@ app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),
 }));
 
 /* ---------------- Work timing (company default + per-employee override) ---------------- */
-const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true,web_clock:true,require_location:false,allow_remote:true,office_lat:null,office_lng:null,office_radius:200};
+const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true,web_clock:true,require_location:false,allow_remote:true,office_lat:null,office_lng:null,office_radius:200,ot_enabled:true,ot_min_minutes:30};
 const distM=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b),h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 const HHMM=/^([01]\d|2[0-3]):[0-5]\d$/;
 function cleanTiming(x,partial){
@@ -900,7 +900,8 @@ function cleanTiming(x,partial){
     else{const v=Number(x[k]);if(!Number.isFinite(v)||Math.abs(v)>(k==="office_lat"?90:180))throw new Error("Office location is not valid");o[k]=v}
   }
   if(x?.office_radius!==undefined&&x.office_radius!==""){const v=Number(x.office_radius);if(!(v>=20&&v<=5000))throw new Error("Office radius must be between 20 and 5000 metres");o.office_radius=v}
-  for(const k of ["break_on","notify_low_hours","notify_late","web_clock","require_location","allow_remote"])if(x?.[k]!==undefined)o[k]=!!x[k];
+  if(x?.ot_min_minutes!==undefined&&x.ot_min_minutes!==""){const v=Number(x.ot_min_minutes);if(!(v>=0&&v<=240))throw new Error("Overtime threshold must be between 0 and 240 minutes");o.ot_min_minutes=v}
+  for(const k of ["break_on","notify_low_hours","notify_late","web_clock","require_location","allow_remote","ot_enabled"])if(x?.[k]!==undefined)o[k]=!!x[k];
   if(!partial&&(!o.start||!o.end))throw new Error("Start and close time are required");
   return o;
 }
@@ -917,8 +918,9 @@ function dayMetrics(t,firstIn,lastOut){
     const bLen=t.break_on?Math.max(0,toMin(t.break_end)-toMin(t.break_start)):0;
     if(t.break_on&&inM<toMin(t.break_start)&&toMin(lastOut.slice(11,16))>toMin(t.break_end))w-=bLen;
     r.worked_minutes=Math.max(0,w);
-    const std=toMin(t.end)-toMin(t.start)-bLen;
-    r.overtime_minutes=Math.max(0,w-std);
+    // Overtime is the time worked after the shift close time, counted only once it passes the threshold.
+    const after=toMin(lastOut.slice(11,16))-toMin(t.end);
+    r.overtime_minutes=t.ot_enabled&&after>0&&after>=Number(t.ot_min_minutes||0)?after:0;
   }
   return r;
 }
@@ -2038,6 +2040,40 @@ app.get("/api/export/:dataset",auth,requireCompany,wrap(async(req,res)=>{
   const format=req.query.format==="csv"?"csv":"xlsx";
   await audit(req,"EXPORT","DATA",`${req.params.dataset} (${rows.length} rows, ${format})`);
   await sendTable(res,format,`${(company?.code||"company").toLowerCase()}_${req.params.dataset}_${new Date().toISOString().slice(0,10)}`,cfg.columns(req),rows);
+}));
+
+/* ---------------- Overtime report ---------------- */
+async function overtimeData(req,month){
+  const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
+  let q="SELECT a.work_date,a.first_in,a.last_out,e.id eid,e.employee_code,e.name,e.department,e.work_timing FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? AND a.work_date LIKE ? AND a.last_out IS NOT NULL";
+  const p=[req.user.company_id,month+"%"];
+  q=teamFilter(req,q,p);
+  const rows=await db.prepare(q+" ORDER BY e.employee_code,a.work_date").all(...p);
+  const daily=[],sum=new Map();
+  for(const r of rows){
+    const t=timingFor(co,r),m=dayMetrics(t,r.first_in,r.last_out);
+    if(!m.overtime_minutes)continue;
+    daily.push({work_date:r.work_date,employee_code:r.employee_code,name:r.name,department:r.department,shift_end:t.end,last_out:r.last_out.slice(11,16),overtime_minutes:m.overtime_minutes,overtime:fmtHM(m.overtime_minutes)});
+    const x=sum.get(r.eid)||{employee_code:r.employee_code,name:r.name,department:r.department,days:0,minutes:0};
+    x.days++;x.minutes+=m.overtime_minutes;sum.set(r.eid,x);
+  }
+  const summary=[...sum.values()].map(x=>({...x,hours:+(x.minutes/60).toFixed(2),total:fmtHM(x.minutes)})).sort((a,b)=>b.minutes-a.minutes);
+  return {summary,daily};
+}
+app.get("/api/reports/overtime",auth,requireCompany,roles("Super Admin","HR Admin","Director","Finance","Manager"),wrap(async(req,res)=>{
+  const month=/^\d{4}-\d{2}$/.test(req.query.month||"")?req.query.month:istNow().date.slice(0,7);
+  res.json({month,...await overtimeData(req,month)});
+}));
+app.get("/api/reports/overtime/export",auth,requireCompany,roles("Super Admin","HR Admin","Director","Finance","Manager"),wrap(async(req,res)=>{
+  const month=/^\d{4}-\d{2}$/.test(req.query.month||"")?req.query.month:istNow().date.slice(0,7);
+  const d=await overtimeData(req,month);
+  const format=req.query.format==="csv"?"csv":"xlsx";
+  const detail=req.query.detail==="1";
+  await audit(req,"EXPORT","DATA",`overtime ${month}`);
+  const co=await db.prepare("SELECT code FROM companies WHERE id=?").get(req.user.company_id);
+  const name=`${(co?.code||"company").toLowerCase()}_overtime_${month}${detail?"_daily":""}`;
+  if(detail)return sendTable(res,format,name,[{header:"Date",key:"work_date"},{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Department",key:"department"},{header:"Shift End",key:"shift_end"},{header:"Last Out",key:"last_out"},{header:"Overtime",key:"overtime"},{header:"Overtime (minutes)",key:"overtime_minutes"}],d.daily);
+  return sendTable(res,format,name,[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Department",key:"department"},{header:"Overtime Days",key:"days"},{header:"Total Overtime",key:"total"},{header:"Total Hours",key:"hours"}],d.summary);
 }));
 
 app.get("/api/audit",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>res.json(await db.prepare(`SELECT a.*,u.username FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE a.company_id=? ORDER BY a.id DESC LIMIT 300`).all(req.user.company_id))));
