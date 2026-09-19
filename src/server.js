@@ -10,6 +10,8 @@ const app=express();
 const PORT=process.env.PORT||3000;
 app.set("trust proxy",1);
 app.use(express.json({limit:"15mb"}));
+// Express 5 leaves req.body undefined when a request has no body; routes read req.body.x directly.
+app.use((req,res,next)=>{if(req.body===undefined)req.body={};next()});
 app.use(express.urlencoded({extended:true}));
 app.use(express.static(path.join(__dirname,"..","public")));
 
@@ -828,8 +830,13 @@ function makeDoc(lh){
   return doc;
 }
 // Renders plain-text content: "# " title, "## " heading, numbered short lines as headings.
+// The built-in PDF fonts only cover Western characters: tabs and other unsupported characters print as garbage.
+function pdfSafe(t){
+  return String(t||"").replace(/\r/g,"").replace(/\t/g,"    ").replace(/₹/g,"Rs. ").replace(/ /g," ")
+    .replace(/[^\n\x20-\x7E¡-ÿ–—‘’“”•…€™]/g,"?");
+}
 function renderContent(doc,content){
-  for(const raw of String(content||"").split("\n")){
+  for(const raw of pdfSafe(content).split("\n")){
     const line=raw.replace(/\s+$/,"");
     if(line.startsWith("# "))doc.font("Helvetica-Bold").fontSize(14).fillColor("#0f172a").text(line.slice(2),{align:"center"}).moveDown(0.4);
     else if(line.startsWith("## "))doc.moveDown(0.4).font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text(line.slice(3));
