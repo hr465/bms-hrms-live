@@ -1,0 +1,112 @@
+# LETTER OF AGREEMENT
+
+Ref no: {{company_name}} / {{employee_code}}
+Date: {{issue_date}}
+
+Employee: {{employee_name}}    Employee code: {{employee_code}}
+Designation: {{designation}}    Department: {{department}}
+Date of joining: {{joining_date}}
+
+1. Employment Details
+You are hereby appointed to the position of {{designation}} in the {{department}} Department of {{company_name}}, effective from {{joining_date}}. You will be on probation for a period of three (3) months from the date of joining.
+
+2. Office Timings and Attendance
+The official working hours shall be from 10:00 AM to 7:00 PM. And for the E-Mitra Team The Working hours are 9:30AM to 6:30PM A full working day consists of a minimum of 9 working hours, excluding two tea breaks of 15 minutes each and one lunch break of 30 minutes.
+Employees are permitted up to three late arrivals per month. On the fourth instance, one full day's salary will be deducted as per company policy.
+Employees are permitted to leave work up to 1.5 hours before the scheduled end time on a maximum of two occasions per month. In such instances, the employee must compensate for the lost time by extending their working hours on the next working day.
+Attendance must be recorded daily through the official biometric or authorized portal system. Use of the mobile application for attendance marking is permitted only with prior approval from the concerned authority.
+All employees are required to complete their timesheets on a daily basis and ensure that attendance is accurately recorded through the approved office system.
+Working hours recorded in the HR portal shall be considered the official record for monthly salary calculation. Employees are responsible for ensuring that all time entries are accurate and updated in a timely manner.
+Employees are required to strictly adhere to their assigned lunch slots and mark their lunch break in the HR portal accordingly.
+Lunch is organized in three fixed slots:
+12:30 PM to 1:00 PM
+1:00 PM to 1:30 PM
+1:30 PM to 2:00 PM
+If an employee chooses to go outside the office for lunch, they must inform the HR department before leaving. External lunch breaks must not exceed 30 minutes under any circumstances. Extended breaks may result in disciplinary action.
+
+3. Leaves, Holidays & Festivals
+No leave is permitted during the first month of employment. All new employees must complete 7 days of mandatory training followed by a 3-month probation period. During this entire period, no paid leave will be granted, and any leave taken will be treated as Leave Without Pay (LWP).
+After confirmation, employees are entitled to 12 paid leaves per calendar year (January–December), including birthday leave. A minimum of 5 paid leaves must be utilized within the year.
+If an employee has formally applied for a half-day and received approval, then they are permitted to leave the office between 2:00 PM and 2:30 PM.
+A maximum of four employees may be on leave on the same day. Employees are required to coordinate with their colleagues to ensure proper workflow management.
+All leave requests must be submitted through the official HR portal. Leave requests made via phone call, WhatsApp, or text message will not be accepted or considered valid.
+All leave requests must be submitted at least two (2) days in advance through the formal leave application process, clearly stating the reason in the comments section. Leave requests submitted on Sundays will not be considered. Emergency medical leave will be granted only upon submission of a valid medical certificate, and the leave dates must correspond exactly with the dates mentioned in the supporting document.
+Any instance of unapproved or rejected leave shall result in a deduction of two (2) days from the employee’s leave balance. This measure is implemented to maintain discipline and ensure proper planning and timely communication regarding leave requests.
+{{company_name}} follows the Indian Public Holiday calendar. The office shall remain closed on all major Indian public holidays and festivals. The official list of holidays will be declared at the beginning of each calendar year.
+Employees are not permitted to regularly combine their personal, casual, or earned leave with weekends (Saturday and Sunday) or official holidays/festivals. Repeated or habitual clubbing of leave in this manner without prior approval may result in such leave being treated as unpaid and may also lead to disciplinary action.
+Early Exit Clause
+The employee shall serve a minimum period of one (1) year from the date of joining. Resignation before completion of one year will not be permitted.
+Early exit may be considered only in case of a medical emergency or other genuine circumstances, subject to prior approval from Management and HR. The decision of Management shall be final.
+4. Salary & Security Deposit
+Salary shall be credited between the 1st and 7th of every month. Employees who join on or before the 20th of the month will receive their salary in the following month, whereas those who join after the 20th will have their salary processed and adjusted in the subsequent month.
+
+A security deposit of ₹9000 will be deducted in six equal installments over the first six months. This deposit is refundable only if the employee completes one year of service and resigns following due procedure. It will not be refunded if the employee leaves before completing one year or fails to adhere to the exit formalities.
+
+5. Police Verification
+All employees are required to submit their police verification certificate either within one month of joining or within one month from the date of request during employment. Failure to comply may result in administrative action or withholding of benefits.
+6. Discipline & Conduct
+Frequent unapproved leave and habitual late arrivals shall be monitored by the HR Department. Employees may receive up to three (3) warnings for such violations. Continued non-compliance thereafter may result in salary deductions, suspension, or termination of employment.
+Any misconduct, harassment, or financial misbehavior will result in written warnings, with termination considered after three warnings.
+The consumption, possession, or use of alcohol, tobacco products, banned substances, or non-vegetarian food items is strictly prohibited within the company premises, including all indoor and outdoor areas of the workplace.
+In the event of any financial loss incurred by the Company as a direct result of an employee’s negligence, the Company reserves the right to recover part of the loss by deducting up to 10% of the employee’s monthly salary, in accordance with applicable laws and company policy.
+7.Dress Code & ID Policy
+
+Two (2) pairs of uniform material shall be provided to employees after completion of probation period for 3 Months. The Company will bear the stitching cost for only one (1) pair, subject to submission of a valid bill from the tailoring service.
+Employees are required to wear the prescribed uniform from Monday to Friday. Exceptions are permitted up to two (2) times per month; thereafter, a fine of ₹50 per day shall be imposed for non-compliance.
+The official Employee ID card must be worn at all times during working hours. A penalty of ₹20 shall be levied for failure to wear the ID card, and a fee of ₹100 will be charged for issuance of a replacement card.
+{{company_name}} expects all employees to maintain a professional dress code. Casual attire and wearing slippers or chappals to the office are strictly discouraged and may attract disciplinary action.
+8. Asset Responsibility
+All assigned company assets must be used responsibly and shall not be exchanged, transferred, or modified without prior approval from the concerned authority. Upon resignation or termination of employment, all company assets and official documents must be returned to the HR Department in good condition.
+In the event of any damage to company property or assets resulting from an employee’s intentional act or willful negligence, the cost of repair or replacement shall be recovered from the employee’s security deposit or any other payable dues, in accordance with company policy and applicable laws.
+9. Confidentiality
+{{company_name}} maintains a high level of data protection and confidentiality in its dealings with clients and stakeholders. As part of audit, compliance, and information security requirements, mobile phones and personal electronic devices are strictly prohibited at workstations. Such devices must be kept in designated lockers or storage areas and may only be used during official break hours in approved areas.
+Employees are strictly prohibited from disclosing, sharing, or discussing any confidential or sensitive information with unauthorized individuals, whether inside or outside the organization. Sharing company-related information through personal email accounts, messaging applications, or social media platforms is strictly prohibited.
+Employees shall access only such information as is necessary for the performance of their assigned job responsibilities. Any unauthorized access or attempt to access restricted data will result in disciplinary action.
+Regular training sessions will be conducted to ensure employees are aware of applicable data privacy laws, security protocols, and best practices for safeguarding sensitive information.
+Any suspected or actual breach of confidentiality must be reported immediately to the Compliance or HR Department. Violation of the confidentiality policy may result in strict disciplinary action, including termination of employment and potential legal consequences in accordance with applicable laws.
+
+10. Work from Home Policy
+The Management exclusively reserves the right to determine which team members may work from home and the duration of such arrangement, based on business requirements.
+All team members approved for work-from-home must maintain a dedicated high-speed internet (broadband) connection to ensure uninterrupted workflow and business continuity.
+Employees are required to maintain professionalism and adhere strictly to prescribed working hours. In the event of power outages or internet disruptions, lost time must be compensated by extending working hours accordingly. Scheduled breaks must be observed as per policy, and no work should be undertaken during designated break periods.
+Data security and confidentiality policies must be strictly adhered to at all times. Employees must remain available via official communication channels, including WhatsApp and phone, during working hours.
+Employees are required to mark their attendance immediately upon login and record sign-out at the end of each working day. All team members must update their attendance sheet before 10:00 AM. Failure to do so may result in leave being marked for that day.
+If an employee is unable to make progress on an assigned task, the matter must be reported promptly to the concerned Team Leader for guidance and resolution.
+
+11. Performance & Appraisals
+{{company_name}} is committed to developing and upskilling its employees. Employees shall be considered eligible for promotion and appraisal upon demonstrating measurable achievements and submitting supporting examples of work that justify their eligibility. All decisions regarding promotions and appraisals shall be made at the sole discretion of the Directors of the Company.
+Performance reviews will be conducted annually and shall be based on the employee’s performance, attendance record, and overall contribution to the organization.
+A Diwali bonus may be granted to employees who have completed a minimum of six (6) months of continuous service with the Company. The bonus shall be subject to the employee’s work performance and adherence to the Company’s code of conduct. The final decision regarding the grant and amount of the bonus shall rest solely with the Directors of the Company.
+
+12. Termination & Resignation
+As per Company policy and the terms agreed upon in the Appointment Letter, all employees are required to serve a mandatory notice period of thirty (30) days upon resignation. In cases of immediate relieving, the Management shall have the sole discretion to accept, waive, or modify the notice requirement based on business considerations.
+No leave shall ordinarily be permitted during the notice period. However, the Management reserves the right to waive, reduce, or extend the notice duration depending on the circumstances.
+Failure or refusal to serve the full 30-day notice period shall be treated as a breach of employment terms and conditions, and the Company reserves the right to take appropriate action in accordance with applicable laws, including the provisions of the Indian Contract Act, 1872.
+
+
+With kind regards,
+For {{company_name}}
+Authorized signatory
+
+Employee: {{employee_name}}
+Designation: {{designation}}
+
+## ANNEXURE-1: Salary
+Basic pay (monthly): Rs. {{basic_monthly}}
+HRA (monthly): Rs. {{hra_monthly}}
+Other allowances (monthly): Rs. {{other_allowances_monthly}}
+Gross salary (monthly): Rs. {{monthly_ctc}}
+Total CTC per annum: Rs. {{annual_ctc}}
+
+Employees shall be reimbursed for eligible expenses strictly in accordance with the terms and conditions defined under the Company's reimbursement policy.
+All reimbursement claims must be supported by valid original bills/invoices and submitted within ten (10) days from the date the expense is incurred. Claims submitted beyond this period may not be considered.
+Any payments or reimbursements outside the standard policy shall be processed only with prior written approval from the Management.
+Salary increments shall be determined based on the employee's annual performance evaluation and in accordance with the Company's appraisal policy and procedures.
+
+## ANNEXURE-2: Statutory deductions
+Provident Fund (PF) contributions shall be deducted at the rate of 12% of the employee's basic salary, in accordance with applicable statutory provisions.
+Employee State Insurance (ESIC) contributions shall be deducted at the rate of 0.75% of the employee's gross wages, as per applicable laws and eligibility criteria.
+
+## DECLARATION
+I, {{employee_name}}, hereby declare that I have thoroughly read, understood, and agreed to all the terms and conditions outlined in this agreement letter provided to me by the company. I acknowledge and accept all clauses without any objections and confirm my commitment to abide by the rules, responsibilities, and expectations set forth therein.
+I acknowledge that adherence to these working hours and break timings is essential for maintaining operational efficiency and discipline within the organization. I further commit to fulfilling my professional duties with integrity and diligence in accordance with the company's policies and code of conduct.

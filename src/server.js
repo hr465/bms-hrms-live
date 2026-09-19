@@ -668,6 +668,8 @@ app.post("/api/employees/:id/agreements",auth,requireCompany,roles("Super Admin"
   const mgr=emp.reporting_manager_id?await db.prepare("SELECT name FROM employees WHERE id=?").get(emp.reporting_manager_id):null;
   const vals={employee_name:emp.name,employee_code:emp.employee_code,designation:emp.designation,department:emp.department,branch:emp.branch,
     reporting_manager:mgr?.name||emp.manager,joining_date:fmtDate(emp.joining_date),company_name:co2?.name,company_address:co2?.address,issue_date:fmtDate(new Date())};
+  {const bs=Number(emp.basic_salary)||0,hr=Number(emp.hra)||0,ot=Number(emp.other_allowances)||0,g=bs+hr+ot;
+   if(g>0)Object.assign(vals,{basic_monthly:fmtNum(bs),hra_monthly:fmtNum(hr),other_allowances_monthly:fmtNum(ot),monthly_ctc:fmtNum(g),annual_ctc:fmtNum(g*12)});}
   const agreementText=company.policy_agreement_text.replace(/\{\{\s*(\w+)\s*\}\}/g,(m,k)=>vals[k]!=null&&vals[k]!==""?String(vals[k]):m);
   const r=await db.prepare("INSERT INTO agreements(company_id,employee_id,title,content,status) VALUES(?,?,?,?,?)")
     .run(req.user.company_id,emp.id,`Company Policy Agreement — ${emp.name}`,agreementText,"Pending Employee");
