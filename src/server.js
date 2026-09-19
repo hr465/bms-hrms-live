@@ -149,7 +149,7 @@ for(const col of ["reporting_manager_id INTEGER","pf_number TEXT","esic_number T
 for(const col of ["category TEXT DEFAULT 'Leave'"]){
   try{await db.exec(`ALTER TABLE leave_requests ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["pf_employee REAL DEFAULT 0","esic_employee REAL DEFAULT 0","tds REAL DEFAULT 0","lop_days REAL DEFAULT 0"]){
+for(const col of ["utr TEXT","paid_at TEXT","paid_mode TEXT","basic REAL DEFAULT 0","hra REAL DEFAULT 0","pf_employee REAL DEFAULT 0","esic_employee REAL DEFAULT 0","tds REAL DEFAULT 0","lop_days REAL DEFAULT 0"]){
   try{await db.exec(`ALTER TABLE payroll ADD COLUMN ${col}`)}catch(e){}
 }
 for(const [oldN,newN] of [["Casual Leave","CL - Casual Leave"],["Sick Leave","SL - Sick Leave"],["Earned Leave","PL - Privilege Leave"]]){
@@ -1158,6 +1158,133 @@ app.get("/api/leaves/balance",auth,requireCompany,wrap(async(req,res)=>{
   res.json(types.map(t=>({leave_type:t.name,annual_balance:t.annual_balance,used:usedMap[t.name]||0,remaining:t.annual_balance-(usedMap[t.name]||0)})));
 }));
 
+
+/* ---------------- Payslip PDF, payslip email and salary payment (UTR) ---------------- */
+function amountInWords(n){
+  n=Math.round(Number(n)||0);
+  if(n===0)return "Zero Rupees Only";
+  const ones=["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
+  const tens=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+  const two=x=>x<20?ones[x]:tens[Math.floor(x/10)]+(x%10?" "+ones[x%10]:"");
+  const three=x=>(x>=100?ones[Math.floor(x/100)]+" Hundred"+(x%100?" ":""):"")+(x%100?two(x%100):"");
+  const parts=[],cr=Math.floor(n/1e7),lk=Math.floor(n%1e7/1e5),th=Math.floor(n%1e5/1e3),rest=n%1e3;
+  if(cr)parts.push(three(cr)+" Crore");if(lk)parts.push(two(lk)+" Lakh");if(th)parts.push(two(th)+" Thousand");if(rest)parts.push(three(rest));
+  return parts.join(" ")+" Rupees Only";
+}
+const MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const monthLabel=m=>{const [y,mm]=String(m).split("-").map(Number);return mm?`${MONTH_NAMES[mm-1]} ${y}`:m};
+const maskAcct=a=>{a=String(a||"").replace(/\s/g,"");return a.length>4?"X".repeat(a.length-4)+a.slice(-4):a};
+async function buildPayslipPdf(companyId,p,emp){
+  const co=await db.prepare("SELECT name,address,contact_email,contact_phone FROM companies WHERE id=?").get(companyId);
+  const logoRow=await db.prepare("SELECT data FROM images WHERE kind='company' AND ref_id=?").get(companyId);
+  return new Promise((resolve,reject)=>{
+    const doc=new PDFDocument({size:"A4",margins:{top:40,bottom:40,left:40,right:40}});
+    const bufs=[];doc.on("data",b=>bufs.push(b));doc.on("end",()=>resolve(Buffer.concat(bufs)));doc.on("error",reject);
+    const L=40,R=555,W=R-L,inr=n=>"Rs. "+Number(n||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+    let x0=L;
+    if(logoRow?.data){try{doc.image(Buffer.from(logoRow.data,"base64"),L,40,{fit:[56,56]});x0=L+68}catch(e){}}
+    doc.font("Helvetica-Bold").fontSize(16).fillColor("#312e81").text(co?.name||"",x0,42,{width:330});
+    doc.font("Helvetica").fontSize(8.5).fillColor("#64748b");
+    if(co?.address)doc.text(co.address,x0,doc.y,{width:330});
+    const cl=[co?.contact_email,co?.contact_phone].filter(Boolean).join("  |  ");if(cl)doc.text(cl,x0,doc.y,{width:330});
+    doc.font("Helvetica-Bold").fontSize(15).fillColor("#0f172a").text("PAYSLIP",380,42,{width:R-380,align:"right"});
+    doc.font("Helvetica").fontSize(10).fillColor("#475569").text(monthLabel(p.month),380,62,{width:R-380,align:"right"});
+    doc.fontSize(8.5).text("No: "+(p.payslip_no||""),380,78,{width:R-380,align:"right"});
+    let y=Math.max(doc.y,100)+10;
+    doc.moveTo(L,y).lineTo(R,y).lineWidth(1.2).strokeColor("#4f46e5").stroke();y+=12;
+    // employee details (two columns)
+    const dim=new Date(Number(p.month.slice(0,4)),Number(p.month.slice(5,7)),0).getDate();
+    const lop=Number(p.lop_days||0);
+    const left=[["Employee name",emp.name],["Employee code",emp.employee_code],["Designation",emp.designation],["Department",emp.department],["Date of joining",emp.joining_date]];
+    const right=[["PAN",emp.pan_number],["UAN",emp.uan_number],["PF number",emp.pf_number],["ESIC number",emp.esic_number],["Bank / A/c",[emp.bank_name,maskAcct(emp.bank_account)].filter(Boolean).join(" / ")]];
+    const rowsTop=y;
+    const col=(items,x)=>{let yy=rowsTop;for(const [k,v] of items){doc.font("Helvetica").fontSize(8.5).fillColor("#64748b").text(k,x,yy,{width:88});doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a").text(String(v||"-"),x+90,yy,{width:170});yy+=15}return yy};
+    y=Math.max(col(left,L),col(right,300))+2;
+    doc.font("Helvetica").fontSize(8.5).fillColor("#64748b").text(`Days in month: ${dim}    Paid days: ${(dim-lop).toFixed(1).replace(/\.0$/,"")}    LOP days: ${lop}`,L,y);y+=20;
+    // earnings and deductions
+    const basic=Number(p.basic||0),hra=Number(p.hra||0),gross=Number(p.gross||0),other=Math.max(0,gross-basic-hra),ot=Number(p.ot||0);
+    const earn=[["Basic",basic],["HRA",hra],["Other allowances",other],["Overtime",ot]].filter(r=>r[1]>0||r[0]==="Basic");
+    const ded=[["Loss of pay",p.lop],["PF (employee)",p.pf_employee],["ESIC (employee)",p.esic_employee],["TDS",p.tds],["Other deductions",p.deductions]].filter(r=>Number(r[1])>0);
+    const hw=(W-10)/2,xe=L,xd=L+hw+10;
+    doc.rect(xe,y,hw,20).fill("#eef2ff");doc.rect(xd,y,hw,20).fill("#eef2ff");
+    doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#312e81").text("EARNINGS",xe+8,y+6).text("DEDUCTIONS",xd+8,y+6);
+    y+=24;const n=Math.max(earn.length,ded.length,1);
+    for(let i=0;i<n;i++){
+      doc.font("Helvetica").fontSize(9).fillColor("#0f172a");
+      if(earn[i]){doc.text(earn[i][0],xe+8,y,{width:hw-110});doc.text(inr(earn[i][1]),xe+hw-108,y,{width:100,align:"right"})}
+      if(ded[i]){doc.text(ded[i][0],xd+8,y,{width:hw-110});doc.text(inr(ded[i][1]),xd+hw-108,y,{width:100,align:"right"})}
+      y+=17;
+    }
+    const totE=basic+hra+other+ot,totD=ded.reduce((a,r)=>a+Number(r[1]),0);
+    doc.moveTo(xe,y).lineTo(xe+hw,y).lineWidth(.6).strokeColor("#cbd5e1").stroke();doc.moveTo(xd,y).lineTo(xd+hw,y).stroke();y+=5;
+    doc.font("Helvetica-Bold").fontSize(9.5).text("Total earnings",xe+8,y).text(inr(totE),xe+hw-108,y,{width:100,align:"right"}).text("Total deductions",xd+8,y).text(inr(totD),xd+hw-108,y,{width:100,align:"right"});
+    y+=26;
+    doc.roundedRect(L,y,W,44,6).fill("#4f46e5");
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#fff").text("NET PAY",L+14,y+8).fontSize(16).text(inr(p.net),L+14,y+22,{width:W-28});
+    doc.font("Helvetica").fontSize(8.5).fillColor("#e0e7ff").text(amountInWords(p.net),L+200,y+27,{width:W-214,align:"right"});
+    y+=58;
+    // payment details
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f172a").text("Payment details",L,y);y+=16;
+    const paid=p.status==="Paid"&&p.utr;
+    const pd=paid?[["Status","Paid"],["Bank UTR / reference",p.utr],["Payment date",p.paid_at],["Mode",p.paid_mode],["Credited to",[emp.bank_name,maskAcct(emp.bank_account)].filter(Boolean).join(" / ")]]:[["Status","Processed - payment to follow"]];
+    for(const [k,v] of pd){doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(k,L,y,{width:130});doc.font("Helvetica-Bold").fillColor("#0f172a").text(String(v||"-"),L+135,y,{width:300});y+=15}
+    doc.font("Helvetica").fontSize(8).fillColor("#94a3b8").text("This is a computer-generated payslip and does not require a signature.",L,780,{width:W,align:"center"});
+    doc.end();
+  });
+}
+async function sendPayslipEmail(companyId,p,emp,paid){
+  if(!emp?.email)return false;
+  const sender=await companySender(companyId);
+  const inr=n=>"Rs. "+Number(n).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pdf=await buildPayslipPdf(companyId,p,emp);
+  const body=paid
+    ?`<p>Hi ${esc2(emp.name)},</p><p>Your salary for <b>${esc2(monthLabel(p.month))}</b> has been credited.</p>
+       <table style="border-collapse:collapse;font-size:14px"><tr><td style="padding:4px 14px 4px 0;color:#64748b">Net pay</td><td><b>${inr(p.net)}</b></td></tr>
+       <tr><td style="padding:4px 14px 4px 0;color:#64748b">Bank UTR</td><td>${esc2(p.utr)}</td></tr>
+       <tr><td style="padding:4px 14px 4px 0;color:#64748b">Payment date</td><td>${esc2(p.paid_at||"-")}</td></tr>
+       <tr><td style="padding:4px 14px 4px 0;color:#64748b">Mode</td><td>${esc2(p.paid_mode||"-")}</td></tr></table>
+       <p style="margin-top:14px">Your payslip is attached as a PDF.</p>`
+    :`<p>Hi ${esc2(emp.name)},</p><p>Your payslip for <b>${esc2(monthLabel(p.month))}</b> has been processed. Net pay: <b>${inr(p.net)}</b>. The payslip is attached as a PDF. You will get another email with the bank reference once the salary is paid.</p>`;
+  return !!await sendMail(emp.email,`${paid?"Salary credited":"Payslip"} for ${monthLabel(p.month)} — ${sender?.name||"HR"}`,layout(paid?"Salary credited":`Payslip — ${esc2(monthLabel(p.month))}`,body),sender,
+    [{filename:`Payslip-${emp.employee_code}-${p.month}.pdf`,content:pdf,contentType:"application/pdf"}]);
+}
+app.get("/api/payroll/:id/pdf",auth,requireCompany,wrap(async(req,res)=>{
+  const p=await db.prepare("SELECT * FROM payroll WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!p)return res.status(404).json({error:"Payslip not found"});
+  if(req.user.role==="Employee"&&p.employee_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
+  if(req.user.role==="Director")return res.status(403).json({error:"Permission denied"});
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=?").get(p.employee_id);
+  const pdf=await buildPayslipPdf(req.user.company_id,p,emp);
+  res.set({"Content-Type":"application/pdf","Content-Disposition":`inline; filename="Payslip-${emp.employee_code}-${p.month}.pdf"`});
+  res.send(pdf);
+}));
+const UTR_RE=/^[A-Za-z0-9\-\/]{6,35}$/;
+async function markPaid(req,p,utr,paidDate,mode){
+  const d=/^\d{4}-\d{2}-\d{2}$/.test(paidDate||"")?paidDate:new Date().toISOString().slice(0,10);
+  await db.prepare("UPDATE payroll SET status='Paid',utr=?,paid_at=?,paid_mode=? WHERE id=?").run(utr,d,mode||null,p.id);
+  const row=await db.prepare("SELECT * FROM payroll WHERE id=?").get(p.id);
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=?").get(p.employee_id);
+  sendPayslipEmail(req.user.company_id,row,emp,true).catch(e=>console.error("paid mail",e.message));
+}
+app.post("/api/payroll/mark-paid-month",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const {month,utr,paid_date}=req.body;
+  if(!/^\d{4}-\d{2}$/.test(month||""))return res.status(400).json({error:"Select the month"});
+  if(!UTR_RE.test(String(utr||"").trim()))return res.status(400).json({error:"Enter a valid bank UTR / reference (6 to 35 letters or digits)"});
+  const rows=await db.prepare("SELECT * FROM payroll WHERE company_id=? AND month=? AND status<>'Paid'").all(req.user.company_id,month);
+  for(const p of rows)await markPaid(req,p,String(utr).trim(),paid_date,"Bank transfer");
+  await audit(req,"MARK_PAID","PAYROLL",`${month}:${utr}`);
+  res.json({ok:true,updated:rows.length});
+}));
+app.post("/api/payroll/:id/mark-paid",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const p=await db.prepare("SELECT * FROM payroll WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!p)return res.status(404).json({error:"Payslip not found"});
+  const utr=String(req.body.utr||"").trim();
+  if(!UTR_RE.test(utr))return res.status(400).json({error:"Enter a valid bank UTR / reference (6 to 35 letters or digits)"});
+  await markPaid(req,p,utr,req.body.paid_date,req.body.mode);
+  await audit(req,"MARK_PAID","PAYROLL",`${p.month}:${utr}`);
+  res.json({ok:true});
+}));
+
 async function computePayroll(companyId,emp,month){
   const [y,m]=month.split("-").map(Number);
   const daysInMonth=new Date(y,m,0).getDate();
@@ -1187,29 +1314,12 @@ async function processOnePayroll(req,employeeId,month,overrides={}){
   const tds=Number(overrides.tds)||0;
   const net=+(gross-deductions-lop-pfEmployee-esicEmployee-tds+ot).toFixed(2);
   const no="BMS-"+Date.now()+"-"+employeeId;
-  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no,pf_employee,esic_employee,tds,lop_days) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no,pf_employee=excluded.pf_employee,esic_employee=excluded.esic_employee,tds=excluded.tds,lop_days=excluded.lop_days`)
-    .run(req.user.company_id,employeeId,month,gross,deductions,lop,ot,net,overrides.status||"Processed",no,pfEmployee,esicEmployee,tds,calc.lopDays);
+  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no,pf_employee,esic_employee,tds,lop_days,basic,hra) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no,pf_employee=excluded.pf_employee,esic_employee=excluded.esic_employee,tds=excluded.tds,lop_days=excluded.lop_days,basic=excluded.basic,hra=excluded.hra,utr=NULL,paid_at=NULL,paid_mode=NULL`)
+    .run(req.user.company_id,employeeId,month,gross,deductions,lop,ot,net,overrides.status||"Processed",no,pfEmployee,esicEmployee,tds,calc.lopDays,calc.basic,calc.hra);
   await audit(req,"UPSERT","PAYROLL",month+":"+emp.employee_code);
-  if(emp.email){
-    const company=await db.prepare("SELECT name,smtp_user,smtp_pass FROM companies WHERE id=?").get(req.user.company_id);
-    const inr=n=>"₹"+Number(n).toLocaleString("en-IN");
-    sendMail(emp.email,`Payslip for ${month} — ${company?.name||"BMS HRMS"}`,layout(`Payslip — ${month}`,
-      `<p>Hi ${emp.name},</p><p>Your payslip for <b>${month}</b> has been processed.</p>
-       <table style="width:100%;border-collapse:collapse;margin-top:10px">
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">Payslip No</td><td style="padding:6px;border:1px solid #e5e7eb">${no}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">Gross</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(gross)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">LOP (${calc.lopDays} day(s))</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(lop)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">PF (Employee)</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(pfEmployee)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">ESIC (Employee)</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(esicEmployee)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">TDS</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(tds)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">Other Deductions</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(deductions)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb">Overtime</td><td style="padding:6px;border:1px solid #e5e7eb">${inr(ot)}</td></tr>
-       <tr><td style="padding:6px;border:1px solid #e5e7eb"><b>Net Pay</b></td><td style="padding:6px;border:1px solid #e5e7eb"><b>${inr(net)}</b></td></tr>
-       </table>
-       <p style="font-size:12px;color:#64748b">Log in to the HRMS to view or print your full payslip.</p>`),
-      {smtp_user:company?.smtp_user,smtp_pass:company?.smtp_pass,name:company?.name}).catch(()=>{});
-  }
+  const row=await db.prepare("SELECT * FROM payroll WHERE employee_id=? AND month=?").get(employeeId,month);
+  if(row)sendPayslipEmail(req.user.company_id,row,emp,false).catch(e=>console.error("payslip mail",e.message));
   return {net,payslip_no:no,gross,lop,pfEmployee,esicEmployee};
 }
 

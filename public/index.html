@@ -265,6 +265,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="payBulkPanel" class="panel" style="display:none"><h3>Run payroll for the whole company</h3><div class="grid" style="grid-template-columns:1fr 1fr"><input id="pbMonth" type="month"><button onclick="runMonthPayroll()">Run Payroll for Month</button></div><p class="small">Auto-calculates gross, LOP (from attendance/unpaid leave), PF and ESIC for every active employee who doesn't already have payroll for that month, and emails each payslip.</p></div>
 <div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code" onchange="autoCalcPayroll()"></div><div><label>Month</label><input id="pem" type="month" onchange="autoCalcPayroll()"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Deductions (other)</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>LOP Days</label><input id="peld" type="number" readonly style="background:#f1f5f9"></div><div><label>PF (Employee)</label><input id="pepf" type="number"></div><div><label>ESIC (Employee)</label><input id="pees" type="number"></div><div><label>TDS</label><input id="petds" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div></div><div class="actions"><button class="outline" onclick="autoCalcPayroll()">Auto-Calculate</button><button onclick="savePayroll()">Process Payroll</button></div></div>
 <div class="searchbar"><input id="paySearch" placeholder="Search employee / month..." oninput="renderPayroll()"></div>
+<div id="payPaidPanel" class="panel" style="display:none"><h3>Mark the whole month as paid</h3><div class="grid" style="grid-template-columns:1fr 1fr 1fr auto"><input id="ppMonth" type="month"><input id="ppUtr" placeholder="Bank UTR / reference"><input id="ppDate" type="date"><button onclick="markMonthPaid()">Mark paid and email</button></div><p class="small">Use this when one bank batch paid everyone. Every processed payslip of the month gets this UTR and the employee is emailed a payslip with the payment details. For individual UTRs use <b>Mark paid</b> on each row.</p></div>
 <div id="payTable" class="tblwrap"></div></section>
 
 <section id="recruitment" class="page"><div class="pagehead"><h2>Recruitment / ATS</h2><button id="candAddBtn" style="display:none" onclick="$('candForm').style.display='block'">+ Add Candidate</button></div><div id="candForm" class="panel" style="display:none"><div class="grid"><input id="cn" placeholder="Candidate Name"><input id="ce" placeholder="Email"><input id="cp" placeholder="Phone"><input id="cpos" placeholder="Position"><input id="cdate" type="date"></div><textarea id="cnotes" placeholder="Notes"></textarea><button onclick="addCandidate()">Add Candidate</button></div>
@@ -427,6 +428,11 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="etErr" class="err"></div><div class="actions" style="margin-top:12px"><button onclick="saveEmpTiming()">Save</button><button class="gray" onclick="$('empTimingModal').classList.remove('show')">Cancel</button></div></div></div>
 
 <div class="modalbg" id="usersModal"><div class="modal" style="max-width:600px"><h3 id="usTitle">Company logins</h3><div id="usBody" style="max-height:380px;overflow:auto"></div><div class="actions" style="margin-top:12px"><button class="gray" onclick="$('usersModal').classList.remove('show')">Close</button></div></div></div>
+
+<div class="modalbg" id="markPaidModal"><div class="modal" style="max-width:460px"><h3>Mark salary as paid</h3>
+<div class="field"><label>Bank UTR / reference number</label><input id="mpUtr" placeholder="e.g. SBIN52026091912345"></div>
+<div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Payment date</label><input id="mpDate" type="date"></div><div class="field"><label>Mode</label><select id="mpMode"><option>NEFT</option><option>IMPS</option><option>RTGS</option><option>UPI</option><option>Cheque</option><option>Cash</option></select></div></div>
+<div id="mpErr" class="err"></div><div class="actions" style="margin-top:12px"><button onclick="saveMarkPaid()">Mark paid and email</button><button class="gray" onclick="$('markPaidModal').classList.remove('show')">Cancel</button></div></div></div>
 
 <div class="modalbg" id="editCompModal"><div class="modal" style="max-width:560px">
 <h3>Edit company</h3>
@@ -637,6 +643,7 @@ function applyRoleVisibility(){
   if($("annAddBtn"))$("annAddBtn").style.display=isHR()?"":"none";
   if($("payForm"))$("payForm").style.display=isFinancePlus()?"":"none";
   if($("payBulkPanel"))$("payBulkPanel").style.display=isFinancePlus()?"":"none";
+  if($("payPaidPanel"))$("payPaidPanel").style.display=isFinancePlus()?"":"none";
 }
 
 async function refreshMe(){
@@ -1013,12 +1020,25 @@ function printPayslip(row){
   window.print();
   document.body.classList.remove("printing");
 }
+let PAY_ID=null;
+async function openMarkPaid(id){
+  PAY_ID=id;
+  $("mpUtr").value="";$("mpDate").value=new Date().toISOString().slice(0,10);$("mpErr").textContent="";$("markPaidModal").classList.add("show");
+}
+async function saveMarkPaid(){
+  try{await api(`/api/payroll/${PAY_ID}/mark-paid`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({utr:$("mpUtr").value,paid_date:$("mpDate").value,mode:$("mpMode").value})});
+    $("markPaidModal").classList.remove("show");await uiAlert("Marked as paid. The employee has been emailed the payslip with the payment details.");loadPage("payroll")}catch(e){$("mpErr").textContent=e.message}
+}
+async function markMonthPaid(){
+  try{const r=await api("/api/payroll/mark-paid-month",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({month:$("ppMonth").value,utr:$("ppUtr").value,paid_date:$("ppDate").value})});
+    await uiAlert(`${r.updated} payslip(s) marked as paid and emailed.`);loadPage("payroll")}catch(e){uiAlert(e.message)}
+}
 function renderPayroll(){
   if(needsCompany("payTable"))return;
   const q=$("paySearch").value;
   const rows=filterRows((PAGEDATA.payroll||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","month"],q);
   window.__payrows=rows;
-  table("payTable",["Employee","Month","Gross","LOP","PF","ESIC","TDS","OT","Net","Status","Payslip","Action"],rows.map((a,i)=>[esc(a.employee_code+" - "+a.name),a.month,a.gross,a.lop,a.pf_employee||0,a.esic_employee||0,a.tds||0,a.ot,"₹"+Number(a.net).toLocaleString("en-IN"),statusBadge(a.status),a.payslip_no,`<button class="sm outline" onclick='printPayslip(window.__payrows[${i}])'>Print</button>`]));
+  table("payTable",["Employee","Month","Gross","LOP","PF","ESIC","TDS","OT","Net","Status","Payslip","Action"],rows.map((a,i)=>[esc(a.employee_code+" - "+a.name),a.month,a.gross,a.lop,a.pf_employee||0,a.esic_employee||0,a.tds||0,a.ot,"₹"+Number(a.net).toLocaleString("en-IN"),statusBadge(a.status),a.payslip_no,`<div class="actions"><a class="sm outline" style="padding:5px 10px;border-radius:6px;text-decoration:none;font-size:12px" href="/api/payroll/${a.id}/pdf" target="_blank" rel="noopener">PDF</a><button class="sm outline" onclick='printPayslip(window.__payrows[${i}])'>Print</button>${isFinancePlus()&&a.status!=="Paid"?`<button class="sm green" onclick="openMarkPaid(${a.id})">Mark paid</button>`:""}</div>`+(a.utr?`<div class="small">UTR: ${esc(a.utr)}</div>`:"")]));
 }
 
 /* ---------- Recruitment ---------- */
