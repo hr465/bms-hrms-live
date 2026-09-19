@@ -132,7 +132,7 @@ for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT","last_seen T
 for(const col of ["email TEXT"]){
   try{await db.exec(`ALTER TABLE users ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["last_digest TEXT","work_timing TEXT","smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT","custom_domain TEXT"]){
+for(const col of ["letterhead_top INTEGER","letterhead_bottom INTEGER","last_digest TEXT","work_timing TEXT","smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT","custom_domain TEXT"]){
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
 }
 try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){}
@@ -709,8 +709,9 @@ app.post("/api/agreements/:id/sign",auth,requireCompany,wrap(async(req,res)=>{
        ${sigBlock("Director",updated.director_signed_name,updated.director_signature,updated.director_signed_at)}
        <p style="color:#166534;font-weight:700">Fully executed on ${new Date(updated.completed_at).toLocaleString("en-IN")}</p>`);
     const sender={smtp_user:company?.smtp_user,smtp_pass:company?.smtp_pass,name:company?.name};
-    if(emp?.email)sendMail(emp.email,`Signed: ${updated.title}`,html,sender).catch(()=>{});
-    if(company?.contact_email)sendMail(company.contact_email,`Signed: ${updated.title}`,html,sender).catch(()=>{});
+    let att;try{att=[{filename:`Agreement-${emp?.employee_code||updated.id}.pdf`,content:await buildAgreementPdf(req.user.company_id,updated),contentType:"application/pdf"}]}catch(e){console.error("agreement pdf",e.message)}
+    if(emp?.email)sendMail(emp.email,`Signed: ${updated.title}`,html,sender,att).catch(()=>{});
+    if(company?.contact_email)sendMail(company.contact_email,`Signed: ${updated.title}`,html,sender,att).catch(()=>{});
   }
   res.json({ok:true,status:updated.status});
 }));
@@ -768,7 +769,7 @@ async function getLetterTemplate(companyId){
   return (c?.letter_template&&c.letter_template.trim())?c.letter_template:DEFAULT_LETTER_TEMPLATE;
 }
 async function buildLetter(companyId,emp,refNo){
-  const company=await db.prepare("SELECT name,code,address FROM companies WHERE id=?").get(companyId);
+  const company=await db.prepare("SELECT id,name,code,address FROM companies WHERE id=?").get(companyId);
   const missing=[];
   if(!emp.designation)missing.push("designation");
   if(!emp.joining_date)missing.push("joining date");
@@ -791,23 +792,116 @@ function letterToHtml(content){
     return line.trim()===""?`<div style="height:8px"></div>`:`<div>${esc(line)}</div>`;
   }).join("");
 }
-function buildLetterPdf(company,content){
+async function buildLetterPdf(company,content){
+  const lh=await getLetterhead(company?.id);
   return new Promise((resolve,reject)=>{
-    const doc=new PDFDocument({size:"A4",margins:{top:56,bottom:56,left:64,right:64}});
+    const doc=makeDoc(lh);
     const bufs=[];doc.on("data",b=>bufs.push(b));doc.on("end",()=>resolve(Buffer.concat(bufs)));doc.on("error",reject);
-    doc.font("Helvetica-Bold").fontSize(17).fillColor("#312e81").text(company?.name||"");
-    if(company?.address)doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(company.address);
-    doc.moveDown(0.6);
-    const y=doc.y;doc.moveTo(64,y).lineTo(531,y).lineWidth(1.2).strokeColor("#4f46e5").stroke();
-    doc.moveDown(1);
-    for(const line of content.split("\n")){
-      if(line.startsWith("## ")){doc.moveDown(0.4).font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text(line.slice(3));}
-      else if(line.trim()===""){doc.moveDown(0.5);}
-      else{doc.font("Helvetica").fontSize(10.5).fillColor("#0f172a").text(line,{lineGap:2});}
+    if(!lh){
+      doc.font("Helvetica-Bold").fontSize(17).fillColor("#312e81").text(company?.name||"");
+      if(company?.address)doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(company.address);
+      doc.moveDown(0.6);
+      const y=doc.y;doc.moveTo(64,y).lineTo(531,y).lineWidth(1.2).strokeColor("#4f46e5").stroke();
+      doc.moveDown(1);
+    }
+    renderContent(doc,content);
+    doc.end();
+  });
+}
+/* ---------------- Letterhead (full-page background for letters and agreements) ---------------- */
+const LH_DEFAULT={top:130,bottom:170};
+async function getLetterhead(companyId){
+  if(!companyId)return null;
+  const row=await db.prepare("SELECT data FROM images WHERE kind='letterhead' AND ref_id=?").get(companyId);
+  if(!row?.data)return null;
+  const c=await db.prepare("SELECT letterhead_top,letterhead_bottom FROM companies WHERE id=?").get(companyId);
+  return {buf:Buffer.from(row.data,"base64"),top:Number(c?.letterhead_top)||LH_DEFAULT.top,bottom:Number(c?.letterhead_bottom)||LH_DEFAULT.bottom};
+}
+// Creates an A4 document. With a letterhead the image is drawn behind every page and the margins keep text clear of it.
+function makeDoc(lh){
+  const doc=new PDFDocument({size:"A4",margins:lh?{top:lh.top,bottom:lh.bottom,left:60,right:60}:{top:56,bottom:56,left:64,right:64}});
+  if(lh){
+    let img=null;try{img=doc.openImage(lh.buf)}catch(e){}
+    const draw=()=>{if(img)doc.image(img,0,0,{width:595.28,height:841.89})};
+    draw();doc.on("pageAdded",draw);
+  }
+  return doc;
+}
+// Renders plain-text content: "# " title, "## " heading, numbered short lines as headings.
+function renderContent(doc,content){
+  for(const raw of String(content||"").split("\n")){
+    const line=raw.replace(/\s+$/,"");
+    if(line.startsWith("# "))doc.font("Helvetica-Bold").fontSize(14).fillColor("#0f172a").text(line.slice(2),{align:"center"}).moveDown(0.4);
+    else if(line.startsWith("## "))doc.moveDown(0.4).font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text(line.slice(3));
+    else if(/^\d{1,2}\.\s?[A-Za-z&]/.test(line)&&line.length<70&&!/[.;:]$/.test(line))doc.moveDown(0.4).font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text(line);
+    else if(line.trim()==="")doc.moveDown(0.5);
+    else doc.font("Helvetica").fontSize(10.5).fillColor("#0f172a").text(line,{lineGap:2});
+  }
+}
+async function buildAgreementPdf(companyId,ag){
+  const lh=await getLetterhead(companyId);
+  const co=await db.prepare("SELECT name,address FROM companies WHERE id=?").get(companyId);
+  return new Promise((resolve,reject)=>{
+    const doc=makeDoc(lh);
+    const bufs=[];doc.on("data",b=>bufs.push(b));doc.on("end",()=>resolve(Buffer.concat(bufs)));doc.on("error",reject);
+    if(!lh){
+      doc.font("Helvetica-Bold").fontSize(17).fillColor("#312e81").text(co?.name||"");
+      if(co?.address)doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(co.address);
+      doc.moveDown(0.6);const y=doc.y;doc.moveTo(64,y).lineTo(531,y).lineWidth(1.2).strokeColor("#4f46e5").stroke();doc.moveDown(1);
+    }
+    renderContent(doc,ag.content);
+    doc.moveDown(1.5);
+    const blocks=[["Employee",ag.employee_signed_name,ag.employee_signature,ag.employee_signed_at],["HR",ag.hr_signed_name,ag.hr_signature,ag.hr_signed_at],["Director",ag.director_signed_name,ag.director_signed_at&&ag.director_signature,ag.director_signed_at]];
+    const need=110*blocks.length;
+    if(doc.y+need>doc.page.height-doc.page.margins.bottom)doc.addPage();
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text("Signatures");doc.moveDown(0.4);
+    for(const [label,name,sig,at] of blocks){
+      const y=doc.y;
+      doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#0f172a").text(label,doc.page.margins.left,y,{width:80});
+      if(name){
+        doc.font("Helvetica").fontSize(9.5).text(name,doc.page.margins.left+80,y,{width:200});
+        doc.fontSize(8).fillColor("#64748b").text(at?new Date(at).toLocaleString("en-IN"):"",doc.page.margins.left+80,y+13,{width:200});
+        const m=/^data:image\/(?:png|jpeg);base64,(.+)$/.exec(String(sig||""));
+        if(m){try{doc.image(Buffer.from(m[1],"base64"),doc.page.margins.left+290,y-4,{fit:[150,50]})}catch(e){}}
+      }else doc.font("Helvetica").fontSize(9.5).fillColor("#94a3b8").text("Pending",doc.page.margins.left+80,y);
+      doc.y=y+62;doc.x=doc.page.margins.left;
     }
     doc.end();
   });
 }
+app.get("/api/agreements/:id/pdf",auth,requireCompany,wrap(async(req,res)=>{
+  const ag=await db.prepare("SELECT * FROM agreements WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!ag)return res.status(404).json({error:"Agreement not found"});
+  if(req.user.role==="Employee"&&ag.employee_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
+  if(!["Employee","Super Admin","HR Admin","Director"].includes(req.user.role))return res.status(403).json({error:"Permission denied"});
+  const pdf=await buildAgreementPdf(req.user.company_id,ag);
+  res.set({"Content-Type":"application/pdf","Content-Disposition":`inline; filename="Agreement-${ag.id}.pdf"`});
+  res.send(pdf);
+}));
+app.get("/api/letterhead",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const has=!!await db.prepare("SELECT 1 x FROM images WHERE kind='letterhead' AND ref_id=?").get(req.user.company_id);
+  const c=await db.prepare("SELECT letterhead_top,letterhead_bottom FROM companies WHERE id=?").get(req.user.company_id);
+  res.json({has,top:Number(c?.letterhead_top)||LH_DEFAULT.top,bottom:Number(c?.letterhead_bottom)||LH_DEFAULT.bottom});
+}));
+app.get("/api/letterhead/image",auth,requireCompany,wrap(async(req,res)=>sendImage(res,"letterhead",req.user.company_id)));
+app.post("/api/letterhead",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const top=Number(req.body.top),bottom=Number(req.body.bottom);
+  if(!(top>=20&&top<=400)||!(bottom>=20&&bottom<=400))return res.status(400).json({error:"Margins must be between 20 and 400 points"});
+  if(req.body.data){
+    const m=IMG_RE.exec(String(req.body.data));
+    if(!m||m[1]==="image/webp")return res.status(400).json({error:"Please upload a PNG or JPG letterhead image"});
+    if(Buffer.byteLength(m[2],"base64")>1500*1024)return res.status(400).json({error:"The letterhead image is too large (maximum 1.5 MB)"});
+    await db.prepare("INSERT INTO images(kind,ref_id,company_id,mime,data) VALUES(?,?,?,?,?) ON CONFLICT(kind,ref_id) DO UPDATE SET mime=excluded.mime,data=excluded.data,company_id=excluded.company_id,updated_at=CURRENT_TIMESTAMP")
+      .run("letterhead",req.user.company_id,req.user.company_id,m[1],m[2]);
+  }
+  await db.prepare("UPDATE companies SET letterhead_top=?,letterhead_bottom=? WHERE id=?").run(Math.round(top),Math.round(bottom),req.user.company_id);
+  await audit(req,"UPDATE","LETTERHEAD","");res.json({ok:true});
+}));
+app.delete("/api/letterhead",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  await db.prepare("DELETE FROM images WHERE kind='letterhead' AND ref_id=?").run(req.user.company_id);
+  await audit(req,"DELETE","LETTERHEAD","");res.json({ok:true});
+}));
+
 async function nextRefNo(companyId,code){
   const yr=new Date().getFullYear();
   const n=Number((await db.prepare("SELECT COUNT(*) c FROM letters WHERE company_id=? AND issued_at LIKE ?").get(companyId,yr+"%")).c)+1;
@@ -869,7 +963,7 @@ app.get("/api/letters/:id/pdf",auth,requireCompany,wrap(async(req,res)=>{
   if(!l)return res.status(404).json({error:"Letter not found"});
   if(req.user.role==="Employee"&&l.employee_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
   if(!["Employee","Super Admin","HR Admin","Director"].includes(req.user.role))return res.status(403).json({error:"Permission denied"});
-  const company=await db.prepare("SELECT name,address FROM companies WHERE id=?").get(req.user.company_id);
+  const company=await db.prepare("SELECT id,name,address FROM companies WHERE id=?").get(req.user.company_id);
   const pdf=await buildLetterPdf(company,l.content);
   res.setHeader("Content-Type","application/pdf");
   res.setHeader("Content-Disposition",`attachment; filename="${l.ref_no.replace(/\//g,"-")}.pdf"`);
