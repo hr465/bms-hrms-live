@@ -105,6 +105,19 @@ tr:last-child td{border-bottom:0}
 .modalbg.show{display:flex}
 .modal{background:#fff;border-radius:14px;padding:24px;max-width:460px;width:92%;max-height:88vh;overflow:auto}
 .modal h3{margin-top:0}
+.dlgbg{display:none;position:fixed;inset:0;background:#0f172acc;z-index:100;align-items:center;justify-content:center;padding:16px}
+.dlgbg.show{display:flex}
+.dlg{background:#fff;border-radius:14px;width:100%;max-width:420px;padding:24px;box-shadow:0 20px 60px #0004;animation:dlgin .16s ease-out}
+@keyframes dlgin{from{transform:translateY(8px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+.dlg .dlgicon{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+.dlg .dlgicon svg{width:22px;height:22px}
+.dlg.ok .dlgicon{background:var(--ok-bg);color:var(--ok-fg)}
+.dlg.err .dlgicon{background:var(--bad-bg);color:var(--bad-fg)}
+.dlg.info .dlgicon{background:var(--brand-soft);color:var(--brand-dark)}
+.dlg.ask .dlgicon{background:var(--warn-bg);color:var(--warn-fg)}
+.dlg h4{margin:0 0 6px;font-size:16px}
+.dlg .dlgmsg{font-size:13.5px;color:#334155;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin-bottom:18px}
+.dlg .dlgactions{display:flex;justify-content:flex-end;gap:8px}
 .chip{display:inline-block;padding:3px 9px;border-radius:6px;background:#f1f2f7;font-size:11px;font-weight:700;color:#475569;margin-right:6px}
 .emptystate{padding:40px 20px;text-align:center;color:var(--sub);font-size:13px}
 .trend{display:flex;align-items:flex-end;gap:6px;height:70px;margin-top:10px}
@@ -345,6 +358,11 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="actions"><button onclick="copyAgentConfig()">Copy Config</button><button class="gray" onclick="$('agentCfgModal').classList.remove('show')">Close</button></div>
 </div></div>
 
+<div class="dlgbg" id="dlgBg"><div class="dlg info" id="dlgBox" role="dialog" aria-modal="true">
+<div class="dlgicon" id="dlgIcon"></div><h4 id="dlgTitle"></h4><div class="dlgmsg" id="dlgMsg"></div>
+<div class="dlgactions"><button class="gray" id="dlgCancel" style="display:none"></button><button id="dlgOk">OK</button></div>
+</div></div>
+
 <div id="payslipPrint"></div>
 
 <script>
@@ -352,6 +370,53 @@ let ME=null,COMPANY=null,COMPANIES_CACHE=[];
 let EMP=[];
 const PAGEDATA={};
 const $=id=>document.getElementById(id);
+
+/* ---------- In-page dialogs (replace native alert/confirm) ---------- */
+const DLG_ICONS={
+  ok:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 13l4 4L19 7"/></svg>',
+  err:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>',
+  info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 11v6M12 7h.01"/><circle cx="12" cy="12" r="9"/></svg>',
+  ask:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>'
+};
+const DLG_QUEUE=[];let DLG_BUSY=false;
+function dlgKind(msg){
+  const m=String(msg);
+  if(/fail|error|invalid|denied|required|not found|already|expired|cannot|could not|too large|select a valid|incorrect|must be|please (select|enter|draw|choose)/i.test(m))return "err";
+  if(/success|saved|added|created|updated|published|submitted|signed|processed|copied|complete|generated|rotated|sent|done/i.test(m))return "ok";
+  return "info";
+}
+function dlgRun(){
+  if(DLG_BUSY||!DLG_QUEUE.length)return;
+  DLG_BUSY=true;
+  const d=DLG_QUEUE.shift();
+  const box=$("dlgBox");box.className="dlg "+d.kind;
+  $("dlgIcon").innerHTML=DLG_ICONS[d.kind];
+  $("dlgTitle").textContent=d.title;
+  $("dlgMsg").textContent=d.message;
+  const ok=$("dlgOk"),cancel=$("dlgCancel");
+  ok.textContent=d.okText;ok.className=d.danger?"red":"";
+  cancel.style.display=d.confirm?"":"none";cancel.textContent=d.cancelText;
+  const close=v=>{
+    $("dlgBg").classList.remove("show");DLG_BUSY=false;
+    document.removeEventListener("keydown",onKey);
+    d.resolve(v);setTimeout(dlgRun,60);
+  };
+  const onKey=e=>{if(e.key==="Escape")close(false);else if(e.key==="Enter")close(true)};
+  ok.onclick=()=>close(true);cancel.onclick=()=>close(false);
+  document.addEventListener("keydown",onKey);
+  $("dlgBg").classList.add("show");
+  setTimeout(()=>ok.focus(),30);
+}
+function uiDialog(o){return new Promise(resolve=>{DLG_QUEUE.push({...o,resolve});dlgRun()})}
+function uiAlert(message,kind){
+  const k=kind||dlgKind(message);
+  const title=k==="err"?"Unable to complete request":k==="ok"?"Success":"Notice";
+  return uiDialog({message,kind:k,title,okText:"OK",confirm:false});
+}
+function uiConfirm(message,opts={}){
+  return uiDialog({message,kind:"ask",title:opts.title||"Please confirm",okText:opts.okText||"Confirm",cancelText:opts.cancelText||"Cancel",confirm:true,danger:!!opts.danger});
+}
+window.alert=uiAlert;
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 async function api(url,opt={}){const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(r.status===401){showLogin();throw Error("Login required")}if(!r.ok)throw Error(d.error||"Request failed");return d}
 function showLogin(){$("app").classList.remove("show");if(RESET_TOKEN){$("resetwrap").classList.add("show");return}$("loginwrap").classList.add("show")}
@@ -365,7 +430,7 @@ let RESET_TOKEN=null;
 async function submitReset(){
   const np=$("rpNew").value;
   try{await api("/api/reset-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:RESET_TOKEN,new_password:np})});
-    alert("Password updated. Please log in.");location.href=location.pathname;
+    await uiAlert("Your password has been updated successfully. Please sign in with your new password.","ok");location.href=location.pathname;
   }catch(e){$("resetErr").textContent=e.message}
 }
 (function checkResetLink(){
@@ -570,7 +635,7 @@ async function loadPage(id){
 function openCompanyModal(){["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
 async function submitCompany(){
   const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
-  try{await api("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("compModal").classList.remove("show");alert("Company onboarded. Share the HR Admin username/password with them to get started.");loadPage("companies");loadCompaniesCache();}
+  try{await api("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("compModal").classList.remove("show");alert("Company onboarded successfully. Share the HR Admin credentials with the company so they can sign in and get started.");loadPage("companies");loadCompaniesCache();}
   catch(e){$("compErr").textContent=e.message}
 }
 async function companyStatus(id,status){try{await api(`/api/companies/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("companies");loadCompaniesCache();}catch(e){alert(e.message)}}
@@ -611,11 +676,11 @@ async function saveEmployee(){
 }
 async function toggleEmpStatus(id,cur){
   const ns=cur==="Active"?"Inactive":"Active";
-  if(!confirm(`Mark employee as ${ns}?`))return;
+  if(!await uiConfirm(`Mark this employee as ${ns}?`,{title:ns==="Inactive"?"Deactivate employee":"Activate employee",okText:ns==="Inactive"?"Deactivate":"Activate",danger:ns==="Inactive"}))return;
   try{await api("/api/employees/"+id+"/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:ns})});loadPage("employees")}catch(e){alert(e.message)}
 }
 async function createLogin(id){
-  if(!confirm("Create a self-service login for this employee? A temporary password will be generated and emailed to them (if they have an email on file)."))return;
+  if(!await uiConfirm("Create a self-service login for this employee? A temporary password will be generated and emailed to them if an email address is on file.",{title:"Create employee login",okText:"Create Login"}))return;
   try{
     const r=await api(`/api/employees/${id}/create-login`,{method:"POST"});
     alert(r.emailed?`Login created and emailed to the employee.\nUsername: ${r.username}`:`Login created.\nUsername: ${r.username}\nTemporary Password: ${r.temp_password}\n(No email on file — share these credentials manually.)`);
@@ -633,7 +698,7 @@ function renderEmployees(){
 /* ---------- Attendance ---------- */
 async function saveAttendance(){
   const eid=isMgrPlus()?resolveEmp("aeid"):ME.employee_id;
-  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
   try{await api("/api/attendance/manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,work_date:$("adate").value,first_in:$("ain").value,last_out:$("aout").value,status:$("ast").value})});alert("Attendance saved");$("aeid").value="";loadPage("attendance")}catch(e){alert(e.message)}
 }
 function renderAttendance(){
@@ -656,10 +721,10 @@ async function loadLeaveBalance(){
 function onLeaveCatChange(){$("letWrap").style.display=$("lecat").value==="Leave"?"":"none"}
 async function applyLeave(){
   const eid=isMgrPlus()?resolveEmp("leid"):ME.employee_id;
-  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
   const category=$("lecat").value;
   const leave_type=category==="Leave"?$("let").value:category;
-  try{await api("/api/leaves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type,category,days:$("led").value,from_date:$("lef").value,to_date:$("letd").value,reason:$("ler").value})});alert("Submitted");$("leid").value="";loadPage("leave")}catch(e){alert(e.message)}
+  try{await api("/api/leaves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type,category,days:$("led").value,from_date:$("lef").value,to_date:$("letd").value,reason:$("ler").value})});alert("Your request has been submitted.");$("leid").value="";loadPage("leave")}catch(e){alert(e.message)}
 }
 async function leaveStatus(id,status){
   try{await api(`/api/leaves/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("leave")}catch(e){alert(e.message)}
@@ -682,12 +747,12 @@ async function autoCalcPayroll(){
   }catch(e){alert(e.message)}
 }
 async function savePayroll(){
-  const eid=resolveEmp("pei");if(!eid)return alert("Select a valid employee");
+  const eid=resolveEmp("pei");if(!eid)return alert("Please select a valid employee from the list.");
   try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,pf_employee:$("pepf").value,esic_employee:$("pees").value,tds:$("petds").value,ot:$("peo").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
 }
 async function runMonthPayroll(){
-  const month=$("pbMonth").value;if(!month)return alert("Select a month");
-  if(!confirm(`Run payroll for the whole company for ${month}? This will process every active employee who doesn't already have payroll for this month, and email payslips.`))return;
+  const month=$("pbMonth").value;if(!month)return alert("Please select a month.");
+  if(!await uiConfirm(`Run payroll for ${month}? This processes every active employee who does not already have payroll for this month and emails their payslips.`,{title:"Run monthly payroll",okText:"Run Payroll"}))return;
   try{const d=await api("/api/payroll/run-month",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({month})});alert(`Done. Processed ${d.processed}, skipped ${d.skipped} (already had payroll), of ${d.total} active employees.`);loadPage("payroll")}catch(e){alert(e.message)}
 }
 function printPayslip(row){
@@ -737,7 +802,7 @@ async function markOnboard(id,payload){try{await api("/api/onboarding/"+id,{meth
 
 /* ---------- Performance ---------- */
 async function savePerformance(){
-  const eid=resolveEmp("peid");if(!eid)return alert("Select a valid employee");
+  const eid=resolveEmp("peid");if(!eid)return alert("Please select a valid employee from the list.");
   try{await api("/api/performance",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,cycle:$("pec").value,rating:$("per").value,goals:$("pegol").value,manager_comments:$("pecm").value})});alert("Review saved");$("peid").value="";loadPage("performance")}catch(e){alert(e.message)}
 }
 
@@ -756,7 +821,7 @@ function renderAssets(){
 /* ---------- Expenses ---------- */
 async function addExpense(){
   const eid=isMgrPlus()?resolveEmp("exei"):ME.employee_id;
-  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
   try{await api("/api/expenses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,category:$("excat").value,amount:$("examt").value,expense_date:$("exdate").value,description:$("exdesc").value})});alert("Claim submitted");$("exei").value="";loadPage("expenses")}catch(e){alert(e.message)}
 }
 async function expenseStatus(id,status){try{await api(`/api/expenses/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("expenses")}catch(e){alert(e.message)}}
@@ -779,7 +844,7 @@ function readFileAsBase64(file){
 }
 async function addDocument(){
   const eid=isHR()?resolveEmp("doei"):ME.employee_id;
-  if(isHR() && !eid)return alert("Select a valid employee");
+  if(isHR() && !eid)return alert("Please select a valid employee from the list.");
   const body={employee_id:eid,name:$("don").value,doc_type:$("dot").value,expiry_date:$("dox").value};
   const file=$("dofile").files[0];
   if(file){
@@ -796,7 +861,7 @@ async function addAnnouncement(){try{await api("/api/announcements",{method:"POS
 /* ---------- Tickets ---------- */
 async function addTicket(){
   const eid=isMgrPlus()?resolveEmp("tei"):ME.employee_id;
-  if(isMgrPlus() && !eid)return alert("Select a valid employee");
+  if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
   try{await api("/api/tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,subject:$("tes").value,priority:$("tep").value,description:$("ted").value})});alert("Ticket created");$("tei").value="";loadPage("tickets")}catch(e){alert(e.message)}
 }
 async function ticketStatus(id,status){try{await api(`/api/tickets/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("tickets")}catch(e){alert(e.message)}}
@@ -812,7 +877,7 @@ function renderTickets(){
 /* ---------- Exits ---------- */
 async function createExit(){
   const eid=isHR()?resolveEmp("xei"):ME.employee_id;
-  if(isHR() && !eid)return alert("Select a valid employee");
+  if(isHR() && !eid)return alert("Please select a valid employee from the list.");
   try{await api("/api/exits",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,resignation_date:$("xrd").value,last_working_date:$("xlwd").value,reason:$("xr").value})});alert("Exit request submitted");$("xei").value="";loadPage("exits")}catch(e){alert(e.message)}
 }
 async function exitAction(id,field,value){try{await api(`/api/exits/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({[field]:value})});loadPage("exits")}catch(e){alert(e.message)}}
@@ -847,8 +912,8 @@ function copyAgentConfig(){
   navigator.clipboard?.writeText($("agentCfgText").textContent).then(()=>alert("Copied. Save this as sync-agent.config.json on the office PC running the agent."));
 }
 async function rotateDeviceKey(id){
-  if(!confirm("Rotate this device's API key? The old key (and any running sync agent using it) will stop working until updated."))return;
-  try{await api(`/api/biometric/devices/${id}/rotate-key`,{method:"POST"});alert("Key rotated.");loadPage("biometric")}catch(e){alert(e.message)}
+  if(!await uiConfirm("Rotate this device's API key? The old key, and any sync agent using it, will stop working until it is updated.",{title:"Rotate API key",okText:"Rotate Key",danger:true}))return;
+  try{await api(`/api/biometric/devices/${id}/rotate-key`,{method:"POST"});alert("The API key has been rotated. Update any sync agent that uses this device.");loadPage("biometric")}catch(e){alert(e.message)}
 }
 function resetDeviceForm(){["bn","bm","bsn","bb","bi"].forEach(id=>$(id).value="");$("bp").value="4370";$("editDeviceId").value="";$("bioSaveBtn").textContent="Add Device";$("bioFormTitle").textContent="Register a device"}
 function editDevice(id){
@@ -946,11 +1011,11 @@ async function loadAgreements(){
     </div>`).join("");
 }
 async function generateAgreement(){
-  const eid=resolveEmp("agEmpPicker");if(!eid)return alert("Select a valid employee");
+  const eid=resolveEmp("agEmpPicker");if(!eid)return alert("Please select a valid employee from the list.");
   try{await api(`/api/employees/${eid}/agreements`,{method:"POST"});alert("Agreement generated");$("agEmpPicker").value="";loadAgreements();}catch(e){alert(e.message)}
 }
 async function quickGenerateAgreement(empId){
-  if(!confirm("Generate an onboarding agreement for this employee using the current Policy Agreement text?"))return;
+  if(!await uiConfirm("Generate an onboarding agreement for this employee using the current Policy Agreement text?",{title:"Generate agreement",okText:"Generate"}))return;
   try{await api(`/api/employees/${empId}/agreements`,{method:"POST"});alert("Agreement generated. Go to Agreements page to track signing.");}catch(e){alert(e.message)}
 }
 let CURRENT_SIGN_ID=null,SIG_DRAWING=false,SIG_CTX=null;
@@ -993,7 +1058,7 @@ async function submitSign(){
 /* ---------- Password ---------- */
 function openPwd(){$("pwdCur").value="";$("pwdNew").value="";$("pwdErr").textContent="";$("pwdModal").classList.add("show")}
 async function doChangePwd(){
-  try{await api("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({current_password:$("pwdCur").value,new_password:$("pwdNew").value})});$("pwdModal").classList.remove("show");alert("Password updated")}catch(e){$("pwdErr").textContent=e.message}
+  try{await api("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({current_password:$("pwdCur").value,new_password:$("pwdNew").value})});$("pwdModal").classList.remove("show");alert("Your password has been updated successfully.")}catch(e){$("pwdErr").textContent=e.message}
 }
 
 (async()=>{try{const d=await api("/api/me");ME=d.user;boot()}catch{showLogin()}})();
