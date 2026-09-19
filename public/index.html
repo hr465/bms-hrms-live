@@ -659,7 +659,7 @@ async function refreshMe(){
   const d=await api("/api/me");ME={...d.user};COMPANY=d.company||null;
   $("hdrCompany").textContent=COMPANY?COMPANY.name:"BMS Enterprise HRMS";
   refreshBrand();if(!COMPANY)$("hdrLogo").textContent="BMS";
-  $("hdrSub").textContent=COMPANY?(COMPANY.industry||"Company workspace"):"Platform administration";
+  $("hdrSub").textContent=COMPANY?(ME.role==="Super Admin"?"Read-only view — changes are made by the company HR Admin":(COMPANY.industry||"Company workspace")):"Platform administration";
   if(ME.role==="Super Admin"){
     $("compSwitchWrap").style.display="block";
     $("compSwitchLabel").textContent=COMPANY?COMPANY.name:"Platform view";
@@ -805,7 +805,7 @@ async function companyStatus(id,status){try{await api(`/api/companies/${id}/stat
 function renderCompanies(){
   const rows=PAGEDATA.companies||[];
   table("compTable",["Company","Code","Domain","Industry","Employees","Status","Onboarded","Action"],rows.map(c=>[esc(c.name),`<span class="chip">${esc(c.code)}</span>`,c.custom_domain?esc(c.custom_domain):`<span class="small">Not set</span>`,esc(c.industry||"-"),c.employee_count,statusBadge(c.status),c.created_at,
-    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">Manage</button><button class="sm gray" onclick="openEditCompany(${c.id})">Edit</button><button class="sm gray" onclick="openUsers(${c.id})">Logins</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">View</button><button class="sm gray" onclick="openEditCompany(${c.id})">Edit</button><button class="sm gray" onclick="openUsers(${c.id})">Logins</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
 }
 async function openUsers(id){
   const c=(PAGEDATA.companies||[]).find(x=>x.id===id);

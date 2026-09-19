@@ -12,6 +12,18 @@ app.set("trust proxy",1);
 app.use(express.json({limit:"15mb"}));
 // Express 5 leaves req.body undefined when a request has no body; routes read req.body.x directly.
 app.use((req,res,next)=>{if(req.body===undefined)req.body={};next()});
+// The platform Super Admin manages companies, not their data: inside a company workspace it is read-only.
+// Employees, payroll, attendance and the rest are maintained by that company's own HR Admin.
+const SA_WRITE_OK=[/^\/api\/login$/,/^\/api\/logout$/,/^\/api\/change-password$/,/^\/api\/switch-company$/,/^\/api\/companies(\/|$)/,/^\/api\/users\/\d+\/reset-password$/,/^\/api\/images\/company\/\d+$/,/^\/api\/email-test$/,/^\/api\/forgot-password$/,/^\/api\/reset-password$/];
+app.use("/api",async(req,res,next)=>{
+  try{
+    if(req.method==="GET"||req.method==="HEAD"||req.method==="OPTIONS")return next();
+    if(SA_WRITE_OK.some(r=>r.test(req.path.startsWith("/api")?req.path:"/api"+req.path)))return next();
+    const u=await me(req);
+    if(u?.role==="Super Admin")return res.status(403).json({error:"The platform administrator has read-only access to a company's data. Please ask the company's HR Admin to make this change."});
+  }catch(e){}
+  next();
+});
 app.use(express.urlencoded({extended:true}));
 app.use(express.static(path.join(__dirname,"..","public")));
 
