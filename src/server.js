@@ -526,6 +526,7 @@ app.post("/api/employees",auth,requireCompany,roles("Super Admin","HR Admin"),wr
     await db.prepare("INSERT OR IGNORE INTO onboarding(company_id,employee_id) VALUES(?,?)").run(req.user.company_id,r.lastInsertRowid);
     await backfillFromPunches(req.user.company_id,x.biometric_id);
     await audit(req,"CREATE","EMPLOYEE",x.employee_code);res.json({id:r.lastInsertRowid});
+    notifyEmployeeWelcome(req.user.company_id,x).catch(e=>console.error("welcome mail",e.message));
   }catch(e){res.status(400).json({error:friendlyDupError(e)})}
 }));
 app.put("/api/employees/:id",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
@@ -667,6 +668,7 @@ app.post("/api/employees/:id/agreements",auth,requireCompany,roles("Super Admin"
     .run(req.user.company_id,emp.id,`Company Policy Agreement — ${emp.name}`,company.policy_agreement_text,"Pending Employee");
   await audit(req,"CREATE","AGREEMENT",emp.employee_code);
   res.json({id:r.lastInsertRowid});
+  notifyAgreementStep(req.user.company_id,emp.id,"Pending Employee").catch(e=>console.error("agreement mail",e.message));
 }));
 app.post("/api/agreements/:id/sign",auth,requireCompany,wrap(async(req,res)=>{
   const ag=await db.prepare("SELECT * FROM agreements WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
@@ -688,6 +690,7 @@ app.post("/api/agreements/:id/sign",auth,requireCompany,wrap(async(req,res)=>{
   }
   await audit(req,"SIGN","AGREEMENT",String(ag.id));
   const updated=await db.prepare("SELECT * FROM agreements WHERE id=?").get(ag.id);
+  if(updated.status!=="Completed")notifyAgreementStep(req.user.company_id,updated.employee_id,updated.status).catch(e=>console.error("agreement mail",e.message));
   if(updated.status==="Completed"){
     const emp=await db.prepare("SELECT * FROM employees WHERE id=?").get(updated.employee_id);
     const company=await db.prepare("SELECT name,contact_email,smtp_user,smtp_pass FROM companies WHERE id=?").get(req.user.company_id);
@@ -924,7 +927,33 @@ function esc2(v){return String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&l
 async function seniorEmails(companyId){
   const rows=await db.prepare("SELECT e.email FROM users u JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.active=1 AND u.role IN ('HR Admin','Director') AND e.email IS NOT NULL AND e.email<>''").all(companyId);
   const c=await db.prepare("SELECT contact_email FROM companies WHERE id=?").get(companyId);
-  return [...new Set([...rows.map(r=>r.email),c?.contact_email].filter(Boolean))];
+  const direct=await db.prepare("SELECT email FROM users WHERE company_id=? AND active=1 AND role IN ('HR Admin','Director') AND email IS NOT NULL AND email<>''").all(companyId);
+  return [...new Set([...rows.map(r=>r.email),...direct.map(r=>r.email),c?.contact_email].filter(Boolean))];
+}
+async function notifyEmployeeWelcome(companyId,x){
+  if(!x.email)return;
+  const co=await db.prepare("SELECT name FROM companies WHERE id=?").get(companyId);
+  const sender=await companySender(companyId);
+  const row=(k,v)=>v?`<tr><td style="padding:4px 12px 4px 0;color:#64748b">${k}</td><td>${esc2(v)}</td></tr>`:"";
+  await sendMail(x.email,`Welcome to ${co?.name||"the team"}`,layout(`Welcome to ${esc2(co?.name||"the team")}`,
+    `<p>Hi ${esc2(x.name)},</p><p>Welcome aboard! Your employee profile has been created in the HR portal.</p>
+     <table style="border-collapse:collapse;font-size:14px">${row("Employee code",x.employee_code)}${row("Designation",x.designation)}${row("Department",x.department)}${row("Joining date",x.joining_date)}</table>
+     <p style="margin-top:14px">Your HR team will share your portal login separately. Once you sign in you can view attendance, apply for leave, download payslips and sign your onboarding agreement.</p>`),sender);
+}
+async function notifyAgreementStep(companyId,empId,status){
+  const emp=await db.prepare("SELECT name,email FROM employees WHERE id=?").get(empId);
+  if(!emp)return;
+  const sender=await companySender(companyId);
+  if(status==="Pending Employee"){
+    if(emp.email)await sendMail(emp.email,"Please sign your onboarding agreement",layout("Your agreement is ready",`<p>Hi ${esc2(emp.name)},</p><p>Your onboarding agreement is ready. Please sign in to the HR portal, open <b>Agreements</b> and sign it.</p>`),sender);
+    return;
+  }
+  const label=status==="Pending HR"?"HR":"Director";
+  const rows=status==="Pending HR"
+    ?await db.prepare("SELECT e.email FROM users u JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.active=1 AND u.role='HR Admin' AND e.email<>''").all(companyId)
+    :await db.prepare("SELECT e.email FROM users u JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.active=1 AND u.role='Director' AND e.email<>''").all(companyId);
+  const to=[...new Set([...rows.map(r=>r.email),...(await db.prepare("SELECT email FROM users WHERE company_id=? AND active=1 AND role=? AND email IS NOT NULL AND email<>''").all(companyId,status==="Pending HR"?"HR Admin":"Director")).map(r=>r.email)])];
+  for(const t of to)await sendMail(t,`Agreement awaiting your signature — ${emp.name}`,layout("Agreement awaiting your signature",`<p>The onboarding agreement of <b>${esc2(emp.name)}</b> has been signed by the previous party and now needs the <b>${label}</b> signature.</p><p>Please sign in to the HR portal and open <b>Agreements</b>.</p>`),sender);
 }
 async function notifyLeaveApplied(companyId,empId,x){
   const emp=await db.prepare("SELECT name,employee_code,reporting_manager_id FROM employees WHERE id=?").get(empId);
