@@ -136,6 +136,7 @@ for(const col of ["last_digest TEXT","work_timing TEXT","smtp_user TEXT","smtp_p
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
 }
 try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){}
+for(const col of ["in_loc TEXT","out_loc TEXT"]){try{await db.exec(`ALTER TABLE attendance ADD COLUMN ${col}`)}catch(e){}}
 for(const col of ["reviewer TEXT","finalized_at TEXT","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
   try{await db.exec(`ALTER TABLE performance ADD COLUMN ${col}`)}catch(e){}
 }
@@ -883,14 +884,20 @@ app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),
 }));
 
 /* ---------------- Work timing (company default + per-employee override) ---------------- */
-const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true,web_clock:true};
+const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true,web_clock:true,require_location:false,allow_remote:true,office_lat:null,office_lng:null,office_radius:200};
+const distM=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b),h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 const HHMM=/^([01]\d|2[0-3]):[0-5]\d$/;
 function cleanTiming(x,partial){
   const o={};
   for(const k of ["start","end","break_start","break_end"])if(x?.[k]!==undefined&&x[k]!==""){if(!HHMM.test(x[k]))throw new Error("Time must be in HH:MM format");o[k]=x[k]}
   if(x?.grace!==undefined&&x.grace!==""){const g=Number(x.grace);if(!(g>=0&&g<=120))throw new Error("Grace minutes must be between 0 and 120");o.grace=g}
   if(x?.min_hours!==undefined&&x.min_hours!==""){const h=Number(x.min_hours);if(!(h>=0&&h<=16))throw new Error("Minimum hours must be between 0 and 16");o.min_hours=h}
-  for(const k of ["break_on","notify_low_hours","notify_late","web_clock"])if(x?.[k]!==undefined)o[k]=!!x[k];
+  for(const k of ["office_lat","office_lng"])if(x?.[k]!==undefined){
+    if(x[k]===""||x[k]===null)o[k]=null;
+    else{const v=Number(x[k]);if(!Number.isFinite(v)||Math.abs(v)>(k==="office_lat"?90:180))throw new Error("Office location is not valid");o[k]=v}
+  }
+  if(x?.office_radius!==undefined&&x.office_radius!==""){const v=Number(x.office_radius);if(!(v>=20&&v<=5000))throw new Error("Office radius must be between 20 and 5000 metres");o.office_radius=v}
+  for(const k of ["break_on","notify_low_hours","notify_late","web_clock","require_location","allow_remote"])if(x?.[k]!==undefined)o[k]=!!x[k];
   if(!partial&&(!o.start||!o.end))throw new Error("Start and close time are required");
   return o;
 }
@@ -1026,7 +1033,8 @@ app.get("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
   const enabled=!!timingFor(co,null).web_clock;
   if(!eid)return res.json({enabled:false,linked:false});
   const a=await db.prepare("SELECT first_in,last_out FROM attendance WHERE employee_id=? AND work_date=?").get(eid,istStamp().slice(0,10));
-  res.json({enabled,linked:true,first_in:a?.first_in||null,last_out:a?.last_out||null});
+  const t=timingFor(co,null);
+  res.json({enabled,linked:true,first_in:a?.first_in||null,last_out:a?.last_out||null,require_location:!!t.require_location});
 }));
 app.post("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.employee_id;
@@ -1034,17 +1042,30 @@ app.post("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
   const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
   if(!timingFor(co,null).web_clock)return res.status(403).json({error:"Web clock in/out is turned off for your company"});
   const now=istStamp(),d=now.slice(0,10);
+  const t=timingFor(co,null);
+  const lat=Number(req.body.lat),lng=Number(req.body.lng),hasLoc=req.body.lat!=null&&req.body.lng!=null&&Number.isFinite(lat)&&Number.isFinite(lng)&&Math.abs(lat)<=90&&Math.abs(lng)<=180;
+  if(t.require_location&&!hasLoc)return res.status(400).json({error:"Location access is required to clock in or out. Please allow location in your browser."});
+  let loc=null;
+  if(hasLoc){
+    loc={lat:+lat.toFixed(6),lng:+lng.toFixed(6),acc:Math.round(Number(req.body.acc)||0)};
+    if(t.office_lat!=null&&t.office_lng!=null){
+      const dist=Math.round(distM(lat,lng,t.office_lat,t.office_lng));
+      loc.dist=dist;loc.mode=dist<=Number(t.office_radius||200)?"Office":"Remote";
+      if(loc.mode==="Remote"&&!t.allow_remote)return res.status(403).json({error:`You are ${dist} m away from the office. Clocking in from outside the office is not allowed.`});
+    }else loc.mode="Recorded";
+  }
+  const locJson=loc?JSON.stringify(loc):null;
   const a=await db.prepare("SELECT id,first_in,last_out FROM attendance WHERE employee_id=? AND work_date=?").get(eid,d);
   if(req.body.action==="in"){
     if(a?.first_in)return res.status(400).json({error:"You have already clocked in today"});
-    if(a)await db.prepare("UPDATE attendance SET first_in=?,status='Present' WHERE id=?").run(now,a.id);
-    else await db.prepare("INSERT INTO attendance(company_id,employee_id,work_date,first_in,status,source) VALUES(?,?,?,?,?,?)").run(req.user.company_id,eid,d,now,"Present","Web");
-    return res.json({ok:true,time:now});
+    if(a)await db.prepare("UPDATE attendance SET first_in=?,status='Present',in_loc=? WHERE id=?").run(now,locJson,a.id);
+    else await db.prepare("INSERT INTO attendance(company_id,employee_id,work_date,first_in,status,source,in_loc) VALUES(?,?,?,?,?,?,?)").run(req.user.company_id,eid,d,now,"Present","Web",locJson);
+    return res.json({ok:true,time:now,mode:loc?.mode||null});
   }
   if(req.body.action==="out"){
     if(!a?.first_in)return res.status(400).json({error:"Clock in first"});
-    await db.prepare("UPDATE attendance SET last_out=? WHERE id=?").run(now,a.id);
-    return res.json({ok:true,time:now});
+    await db.prepare("UPDATE attendance SET last_out=?,out_loc=? WHERE id=?").run(now,locJson,a.id);
+    return res.json({ok:true,time:now,mode:loc?.mode||null});
   }
   res.status(400).json({error:"Invalid action"});
 }));
