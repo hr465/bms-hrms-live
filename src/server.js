@@ -883,14 +883,14 @@ app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),
 }));
 
 /* ---------------- Work timing (company default + per-employee override) ---------------- */
-const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true};
+const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true,web_clock:true};
 const HHMM=/^([01]\d|2[0-3]):[0-5]\d$/;
 function cleanTiming(x,partial){
   const o={};
   for(const k of ["start","end","break_start","break_end"])if(x?.[k]!==undefined&&x[k]!==""){if(!HHMM.test(x[k]))throw new Error("Time must be in HH:MM format");o[k]=x[k]}
   if(x?.grace!==undefined&&x.grace!==""){const g=Number(x.grace);if(!(g>=0&&g<=120))throw new Error("Grace minutes must be between 0 and 120");o.grace=g}
   if(x?.min_hours!==undefined&&x.min_hours!==""){const h=Number(x.min_hours);if(!(h>=0&&h<=16))throw new Error("Minimum hours must be between 0 and 16");o.min_hours=h}
-  for(const k of ["break_on","notify_low_hours","notify_late"])if(x?.[k]!==undefined)o[k]=!!x[k];
+  for(const k of ["break_on","notify_low_hours","notify_late","web_clock"])if(x?.[k]!==undefined)o[k]=!!x[k];
   if(!partial&&(!o.start||!o.end))throw new Error("Start and close time are required");
   return o;
 }
@@ -1013,6 +1013,40 @@ app.get("/api/employees/:id/work-timing",auth,requireCompany,roles("Super Admin"
   if(!e)return res.status(404).json({error:"Employee not found"});
   const c=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
   res.json({custom:!!e.work_timing,effective:timingFor(c,e),override:parseJSON(e.work_timing)});
+}));
+
+/* ---------------- Web clock in / clock out (for employees without a biometric punch) ---------------- */
+function istStamp(){
+  const p=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).formatToParts(new Date()).map(x=>[x.type,x.value]));
+  return `${p.year}-${p.month}-${p.day}T${String(+p.hour%24).padStart(2,"0")}:${p.minute}:${p.second}`;
+}
+app.get("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
+  const eid=req.user.employee_id;
+  const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
+  const enabled=!!timingFor(co,null).web_clock;
+  if(!eid)return res.json({enabled:false,linked:false});
+  const a=await db.prepare("SELECT first_in,last_out FROM attendance WHERE employee_id=? AND work_date=?").get(eid,istStamp().slice(0,10));
+  res.json({enabled,linked:true,first_in:a?.first_in||null,last_out:a?.last_out||null});
+}));
+app.post("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
+  const eid=req.user.employee_id;
+  if(!eid)return res.status(400).json({error:"Your login is not linked to an employee record"});
+  const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
+  if(!timingFor(co,null).web_clock)return res.status(403).json({error:"Web clock in/out is turned off for your company"});
+  const now=istStamp(),d=now.slice(0,10);
+  const a=await db.prepare("SELECT id,first_in,last_out FROM attendance WHERE employee_id=? AND work_date=?").get(eid,d);
+  if(req.body.action==="in"){
+    if(a?.first_in)return res.status(400).json({error:"You have already clocked in today"});
+    if(a)await db.prepare("UPDATE attendance SET first_in=?,status='Present' WHERE id=?").run(now,a.id);
+    else await db.prepare("INSERT INTO attendance(company_id,employee_id,work_date,first_in,status,source) VALUES(?,?,?,?,?,?)").run(req.user.company_id,eid,d,now,"Present","Web");
+    return res.json({ok:true,time:now});
+  }
+  if(req.body.action==="out"){
+    if(!a?.first_in)return res.status(400).json({error:"Clock in first"});
+    await db.prepare("UPDATE attendance SET last_out=? WHERE id=?").run(now,a.id);
+    return res.json({ok:true,time:now});
+  }
+  res.status(400).json({error:"Invalid action"});
 }));
 
 app.get("/api/attendance",auth,requireCompany,wrap(async(req,res)=>{

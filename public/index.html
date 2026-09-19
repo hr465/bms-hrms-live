@@ -246,7 +246,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="toolbar"><div class="searchbar"><input id="empSearch" placeholder="Search name / code / dept..." oninput="renderEmployees()"></div></div>
 <div id="empTable" class="tblwrap"></div></section>
 
-<section id="attendance" class="page"><div class="pagehead"><h2>Attendance</h2></div><div id="attForm" class="panel"><div class="grid">
+<section id="attendance" class="page"><div class="pagehead"><h2>Attendance</h2></div><div id="clockPanel" class="panel" style="display:none"></div><div id="attForm" class="panel"><div class="grid">
 <div class="field" id="aeidWrap"><label>Employee</label><input id="aeid" list="empDL" placeholder="Type name or code"></div>
 <div class="field"><label>Date</label><input id="adate" type="date"></div><div class="field"><label>First In</label><input id="ain" type="datetime-local"></div><div class="field"><label>Last Out</label><input id="aout" type="datetime-local"></div><div class="field"><label>Status</label><select id="ast"><option>Present</option><option>Absent</option><option>Half Day</option><option>Leave</option></select></div></div><button onclick="saveAttendance()">Save Attendance</button></div>
 <div class="searchbar"><input id="attSearch" placeholder="Search employee / date..." oninput="renderAttendance()"></div>
@@ -360,7 +360,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <section id="audit" class="page"><div class="pagehead"><h2>Audit Log</h2></div><div class="searchbar"><input id="auditSearch" placeholder="Search user / action / module..." oninput="renderAudit()"></div><div id="auditTable" class="tblwrap"></div></section>
 <section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
 <div class="panel"><h3>Company profile</h3><p class="small" style="margin-bottom:10px">These details appear on letters and emails. The company name and web address are managed by the platform administrator.</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Industry</label><input id="cpIndustry"></div><div class="field"><label>Contact phone</label><input id="cpPhone"></div></div><div class="field"><label>Address</label><input id="cpAddress"></div><div class="field"><label>Contact email</label><input id="cpEmail" placeholder="hr@company.com"></div><button onclick="saveCompanyProfile()">Save profile</button></div>
-<div class="panel"><h3>Working hours</h3><p class="small" style="margin-bottom:10px">Company default. Late marks, worked hours and overtime are calculated from these. Individual employees can have their own timing from the Employees page.</p><div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div class="field"><label>Start time</label><input id="wtStart" type="time"></div><div class="field"><label>Close time</label><input id="wtEnd" type="time"></div><div class="field"><label>Grace (minutes)</label><input id="wtGrace" type="number" min="0" max="120"></div></div><label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="wtBreakOn" onchange="$('wtBreakRow').style.display=this.checked?'grid':'none'"> Deduct break time</label><div class="grid" id="wtBreakRow" style="grid-template-columns:1fr 1fr"><div class="field"><label>Break start</label><input id="wtBs" type="time"></div><div class="field"><label>Break end</label><input id="wtBe" type="time"></div></div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><div class="field"><label>Minimum working hours per day</label><input id="wtMin" type="number" step="0.5" min="0" max="16"></div></div><label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtNLow"> Email HR when an employee does not complete the minimum hours</label><label style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="wtNLate"> Email HR about late arrivals</label><p class="small" style="margin-bottom:10px">A summary is emailed to HR and directors every working day, 30 minutes after the close time.</p><div class="actions"><button onclick="saveWorkTiming()">Save working hours</button><button class="gray" onclick="sendDigestNow()">Send today's summary now</button></div></div>
+<div class="panel"><h3>Working hours</h3><p class="small" style="margin-bottom:10px">Company default. Late marks, worked hours and overtime are calculated from these. Individual employees can have their own timing from the Employees page.</p><div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div class="field"><label>Start time</label><input id="wtStart" type="time"></div><div class="field"><label>Close time</label><input id="wtEnd" type="time"></div><div class="field"><label>Grace (minutes)</label><input id="wtGrace" type="number" min="0" max="120"></div></div><label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="wtBreakOn" onchange="$('wtBreakRow').style.display=this.checked?'grid':'none'"> Deduct break time</label><div class="grid" id="wtBreakRow" style="grid-template-columns:1fr 1fr"><div class="field"><label>Break start</label><input id="wtBs" type="time"></div><div class="field"><label>Break end</label><input id="wtBe" type="time"></div></div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><div class="field"><label>Minimum working hours per day</label><input id="wtMin" type="number" step="0.5" min="0" max="16"></div></div><label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtWeb"> Allow employees to Clock In / Clock Out from the portal</label><label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtNLow"> Email HR when an employee does not complete the minimum hours</label><label style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="wtNLate"> Email HR about late arrivals</label><p class="small" style="margin-bottom:10px">A summary is emailed to HR and directors every working day, 30 minutes after the close time.</p><div class="actions"><button onclick="saveWorkTiming()">Save working hours</button><button class="gray" onclick="sendDigestNow()">Send today's summary now</button></div></div>
 <div class="panel"><h3>Email Settings</h3><p class="small" id="emailSettingsStatus">Loading...</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Sender Gmail</label><input id="esUser" placeholder="companyhr@gmail.com"></div><div class="field"><label>App Password</label><input id="esPass" type="password" placeholder="16-char app password (leave blank to keep current)"></div></div><button onclick="saveEmailSettings()">Save</button><p class="small" style="margin-top:10px">Used to send announcements, payslips and login emails to this company's employees. Leave both blank to use the platform default sender.</p></div>
 <div class="panel"><h3>Policy Agreement</h3><p class="small" style="margin-bottom:10px">This text is used whenever you generate a new onboarding agreement for an employee (Agreements page). Editing it only affects future agreements, not ones already in progress.</p><textarea id="policyText" style="min-height:220px"></textarea><div class="actions" style="margin-top:10px"><button onclick="savePolicyText()">Save</button></div></div>
 </section>
@@ -718,7 +718,7 @@ async function loadPage(id){
     return;
   }
   if(id==="employees"){PAGEDATA.employees=await api("/api/employees");EMP=PAGEDATA.employees;fillEmpDatalist();renderEmployees();}
-  if(id==="attendance"){PAGEDATA.attendance=await api("/api/attendance");renderAttendance();}
+  if(id==="attendance"){PAGEDATA.attendance=await api("/api/attendance");renderAttendance();loadClock();}
   if(id==="leave"){PAGEDATA.leave=await api("/api/leaves");renderLeaves();loadLeaveBalance();}
   if(id==="payroll"){PAGEDATA.payroll=await api("/api/payroll");renderPayroll();}
   if(id==="recruitment"){PAGEDATA.recruitment=await api("/api/candidates");renderCandidates();}
@@ -909,6 +909,20 @@ async function saveAttendance(){
   const eid=isMgrPlus()?resolveEmp("aeid"):ME.employee_id;
   if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
   try{await api("/api/attendance/manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,work_date:$("adate").value,first_in:$("ain").value,last_out:$("aout").value,status:$("ast").value})});alert("Attendance saved");$("aeid").value="";loadPage("attendance")}catch(e){alert(e.message)}
+}
+async function loadClock(){
+  const box=$("clockPanel");
+  try{
+    const c=await api("/api/attendance/clock");
+    if(!c.enabled||!c.linked){box.style.display="none";return}
+    const t=v=>v?v.slice(11,16):"-";
+    const state=!c.first_in?"You have not clocked in today.":!c.last_out?`Clocked in at <b>${t(c.first_in)}</b>.`:`Clocked in <b>${t(c.first_in)}</b>, last clock out <b>${t(c.last_out)}</b>.`;
+    box.style.display="block";
+    box.innerHTML=`<h3>Today</h3><p class="small" style="margin-bottom:10px">${state}</p><div class="actions"><button ${c.first_in?"disabled":""} onclick="doClock('in')">Clock In</button><button class="gray" ${!c.first_in?"disabled":""} onclick="doClock('out')">Clock Out</button></div>`;
+  }catch(e){box.style.display="none"}
+}
+async function doClock(a){
+  try{const r=await api("/api/attendance/clock",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:a})});await uiAlert(`${a==="in"?"Clocked in":"Clocked out"} at ${r.time.slice(11,16)}.`);PAGEDATA.attendance=await api("/api/attendance");renderAttendance();loadClock()}catch(e){uiAlert(e.message)}
 }
 function renderAttendance(){
   if(needsCompany("attTable"))return;
@@ -1433,11 +1447,11 @@ async function loadWorkTiming(){
     const t=await api("/api/work-timing");
     $("wtStart").value=t.start;$("wtEnd").value=t.end;$("wtGrace").value=t.grace;$("wtBreakOn").checked=!!t.break_on;$("wtBs").value=t.break_start;$("wtBe").value=t.break_end;
     $("wtBreakRow").style.display=t.break_on?"grid":"none";
-    $("wtMin").value=t.min_hours;$("wtNLow").checked=!!t.notify_low_hours;$("wtNLate").checked=!!t.notify_late;
+    $("wtWeb").checked=!!t.web_clock;$("wtMin").value=t.min_hours;$("wtNLow").checked=!!t.notify_low_hours;$("wtNLate").checked=!!t.notify_late;
   }catch(e){}
 }
 async function saveWorkTiming(){
-  try{await api("/api/work-timing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({start:$("wtStart").value,end:$("wtEnd").value,grace:$("wtGrace").value,break_on:$("wtBreakOn").checked,break_start:$("wtBs").value,break_end:$("wtBe").value,min_hours:$("wtMin").value,notify_low_hours:$("wtNLow").checked,notify_late:$("wtNLate").checked})});alert("Working hours have been saved.")}catch(e){alert(e.message)}
+  try{await api("/api/work-timing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({start:$("wtStart").value,end:$("wtEnd").value,grace:$("wtGrace").value,break_on:$("wtBreakOn").checked,break_start:$("wtBs").value,break_end:$("wtBe").value,web_clock:$("wtWeb").checked,min_hours:$("wtMin").value,notify_low_hours:$("wtNLow").checked,notify_late:$("wtNLate").checked})});alert("Working hours have been saved.")}catch(e){alert(e.message)}
 }
 async function sendDigestNow(){
   try{const r=await api("/api/work-timing/send-digest",{method:"POST"});alert(r.sent?`Summary sent to ${r.sent} recipient(s): ${r.late} late, ${r.low} below minimum hours.`:(r.reason||"Nothing to send."))}catch(e){alert(e.message)}
