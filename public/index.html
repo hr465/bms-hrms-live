@@ -151,17 +151,17 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 
 <div id="loginwrap" class="loginwrap">
   <div class="loginbrand">
-    <div class="brandmark" style="color:#fff"><div class="logo">BMS</div><div><div class="co" style="color:#fff">Bhartiya Management Solutions</div><div class="sub" style="color:#dbe0ff">Enterprise HRMS</div></div></div>
+    <div class="brandmark" style="color:#fff"><div class="logo" id="loginLogo">BMS</div><div><div class="co" id="loginCo" style="color:#fff">Bhartiya Management Solutions</div><div class="sub" id="loginSub" style="color:#dbe0ff">Enterprise HRMS</div></div></div>
     <div>
-      <h1>One platform for every company you run.</h1>
-      <div class="tag">Onboard companies, manage employees, attendance, payroll, recruitment and more — all from a single, secure, role-based console.</div>
-      <div class="feat">
+      <h1 id="loginH1">One platform for every company you run.</h1>
+      <div class="tag" id="loginTag">Onboard companies, manage employees, attendance, payroll, recruitment and more — all from a single, secure, role-based console.</div>
+      <div class="feat" id="loginFeat">
         <div><span class="dot"></span> Multi-company workspace with isolated data</div>
         <div><span class="dot"></span> Role-based access — Admin, HR, Manager, Finance, Employee</div>
         <div><span class="dot"></span> Attendance, Leave, Payroll and Recruitment built in</div>
       </div>
     </div>
-    <div style="font-size:12px;opacity:.75">© 2026 Bhartiya Management Solutions</div>
+    <div style="font-size:12px;opacity:.75" id="loginFoot">© 2026 Bhartiya Management Solutions</div>
   </div>
   <div class="loginside">
     <div class="loginbox">
@@ -404,6 +404,14 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 </div>
 <div id="compErr" class="err"></div>
 <div class="actions"><button onclick="submitCompany()">Onboard Company</button><button class="gray" onclick="$('compModal').classList.remove('show')">Cancel</button></div>
+</div></div>
+
+<div class="modalbg" id="domainModal"><div class="modal" style="max-width:520px">
+<h3>Company domain</h3>
+<div class="small" style="margin-bottom:10px">Serve <b id="domCompany"></b> from its own web address, for example <b>hr.example.com</b>. Leave empty to remove the domain.</div>
+<div class="field"><label>Domain</label><input id="domInput" placeholder="hr.example.com"></div>
+<div id="domHelp"></div><div id="domErr" class="err"></div>
+<div class="actions" style="margin-top:12px"><button onclick="saveDomain()">Save</button><button class="gray" onclick="$('domainModal').classList.remove('show')">Cancel</button></div>
 </div></div>
 
 <div class="modalbg" id="agentCfgModal"><div class="modal" style="max-width:520px">
@@ -704,8 +712,40 @@ async function submitCompany(){
 async function companyStatus(id,status){try{await api(`/api/companies/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("companies");loadCompaniesCache();}catch(e){alert(e.message)}}
 function renderCompanies(){
   const rows=PAGEDATA.companies||[];
-  table("compTable",["Company","Code","Industry","Employees","Status","Onboarded","Action"],rows.map(c=>[esc(c.name),`<span class="chip">${esc(c.code)}</span>`,esc(c.industry||"-"),c.employee_count,statusBadge(c.status),c.created_at,
-    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">Manage</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+  table("compTable",["Company","Code","Domain","Industry","Employees","Status","Onboarded","Action"],rows.map(c=>[esc(c.name),`<span class="chip">${esc(c.code)}</span>`,c.custom_domain?esc(c.custom_domain):`<span class="small">Not set</span>`,esc(c.industry||"-"),c.employee_count,statusBadge(c.status),c.created_at,
+    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">Manage</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+}
+let DOMAIN_CO=null;
+function openDomain(id){
+  const c=(PAGEDATA.companies||[]).find(x=>x.id===id);if(!c)return;
+  DOMAIN_CO=c;$("domCompany").textContent=c.name;$("domInput").value=c.custom_domain||"";$("domErr").textContent="";
+  $("domHelp").innerHTML=c.custom_domain?domainHelp(c.custom_domain):"";
+  $("domainModal").classList.add("show");
+}
+function domainHelp(d){
+  const host=d.split(".")[0],p=location.hostname;
+  return `<div class="notice" style="margin-top:10px"><b>To activate this domain</b><br>1. At the company's DNS provider add a <b>CNAME</b> record: name <b>${esc(host)}</b> pointing to <b>${esc(p)}</b>.<br>2. The platform administrator adds <b>${esc(d)}</b> to the hosting service, which then issues the HTTPS certificate automatically.<br>3. Once active, opening <b>https://${esc(d)}</b> shows this company's branded sign-in page and only this company's users can sign in there.</div>`;
+}
+async function saveDomain(){
+  try{
+    const r=await api(`/api/companies/${DOMAIN_CO.id}/domain`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({domain:$("domInput").value})});
+    $("domainModal").classList.remove("show");
+    await alert(r.domain?`The domain ${r.domain} has been saved. Follow the activation steps shown when you reopen the Domain dialog.`:"The domain has been removed.");
+    loadPage("companies");
+  }catch(e){$("domErr").textContent=e.message}
+}
+async function applyBranding(){
+  try{
+    const {company}=await api("/api/branding");
+    if(!company)return;
+    const ini=(company.code||company.name||"HR").replace(/[^A-Za-z0-9]/g,"").slice(0,3).toUpperCase();
+    $("loginLogo").textContent=ini;$("loginCo").textContent=company.name;$("loginSub").textContent="HR Portal";
+    $("loginH1").textContent=`Welcome to the ${company.name} HR portal.`;
+    $("loginTag").textContent="Sign in to view your attendance, leave, payslips, letters and more.";
+    $("loginFeat").style.display="none";
+    $("loginFoot").textContent=`© ${new Date().getFullYear()} ${company.name} · Powered by BMS Enterprise HRMS`;
+    document.title=`${company.name} HR Portal`;
+  }catch(e){}
 }
 
 /* ---------- Employees ---------- */
@@ -1392,6 +1432,7 @@ async function doChangePwd(){
   try{await api("/api/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({current_password:$("pwdCur").value,new_password:$("pwdNew").value})});$("pwdModal").classList.remove("show");alert("Your password has been updated successfully.")}catch(e){$("pwdErr").textContent=e.message}
 }
 
+applyBranding();
 (async()=>{try{const d=await api("/api/me");ME=d.user;boot()}catch{showLogin()}})();
 </script>
 </body>

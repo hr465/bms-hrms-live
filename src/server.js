@@ -18,7 +18,7 @@ await db.exec(`
 CREATE TABLE IF NOT EXISTS companies(
  id SERIAL PRIMARY KEY, name TEXT NOT NULL, code TEXT UNIQUE NOT NULL, industry TEXT,
  address TEXT, contact_email TEXT, contact_phone TEXT, status TEXT DEFAULT 'Active', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
- smtp_user TEXT, smtp_pass TEXT, policy_agreement_text TEXT, increment_policy TEXT, letter_template TEXT
+ smtp_user TEXT, smtp_pass TEXT, policy_agreement_text TEXT, increment_policy TEXT, letter_template TEXT, custom_domain TEXT
 );
 CREATE TABLE IF NOT EXISTS letters(
  id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,letter_type TEXT DEFAULT 'Appointment Letter',
@@ -128,7 +128,7 @@ for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT","last_seen T
 for(const col of ["email TEXT"]){
   try{await db.exec(`ALTER TABLE users ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT"]){
+for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT","custom_domain TEXT"]){
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
 }
 for(const col of ["reviewer TEXT","finalized_at TEXT","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
@@ -231,6 +231,17 @@ async function companySender(companyId){
 }
 function wrap(fn){return (req,res)=>fn(req,res).catch(e=>{console.error(e);res.status(500).json({error:e.message||"Server error"})})}
 
+// A company can be served from its own domain (for example hr.example.com). The request's host
+// decides which company's branding is shown and which users may sign in.
+async function companyByHost(req){
+  const h=String(req.hostname||"").toLowerCase();
+  if(!h)return null;
+  return (await db.prepare("SELECT id,name,code,industry FROM companies WHERE LOWER(custom_domain)=?").get(h))||null;
+}
+app.get("/api/branding",wrap(async(req,res)=>{
+  const c=await companyByHost(req);
+  res.json({company:c?{name:c.name,code:c.code,industry:c.industry}:null});
+}));
 const LOGIN_FAILS=new Map();
 const LOGIN_MAX=8,LOGIN_WINDOW=15*60*1000;
 app.post("/api/login",wrap(async(req,res)=>{
@@ -241,7 +252,8 @@ app.post("/api/login",wrap(async(req,res)=>{
   const cur=LOGIN_FAILS.get(key);
   if(cur && cur.count>=LOGIN_MAX)return res.status(429).json({error:"Too many failed sign-in attempts. Please try again in 15 minutes."});
   const u=await db.prepare("SELECT * FROM users WHERE username=? AND active=1").get(req.body.username||"");
-  if(!u||!verify(req.body.password||"",u.password_hash)){
+  const hostCo=u?await companyByHost(req):null;
+  if(!u||!verify(req.body.password||"",u.password_hash)||(hostCo&&(u.role==="Super Admin"||u.company_id!==hostCo.id))){
     const f=LOGIN_FAILS.get(key)||{count:0,first:now};f.count++;LOGIN_FAILS.set(key,f);
     return res.status(401).json({error:"Invalid username or password"});
   }
@@ -297,6 +309,19 @@ app.put("/api/companies/:id",auth,roles("Super Admin"),wrap(async(req,res)=>{
   await db.prepare("UPDATE companies SET name=?,industry=?,address=?,contact_email=?,contact_phone=? WHERE id=?")
     .run(x.name,x.industry||"",x.address||"",x.contact_email||"",x.contact_phone||"",req.params.id);
   await audit(req,"UPDATE","COMPANY",req.params.id);res.json({ok:true});
+}));
+app.post("/api/companies/:id/domain",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  let d=String(req.body?.domain||"").trim().toLowerCase().replace(/^https?:\/\//,"").replace(/\/.*$/,"");
+  if(d){
+    if(!/^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(d))return res.status(400).json({error:"Enter a valid domain such as hr.example.com"});
+    if(d.endsWith(".onrender.com"))return res.status(400).json({error:"Use the company's own domain, not the platform address"});
+    const taken=await db.prepare("SELECT id FROM companies WHERE LOWER(custom_domain)=?").get(d);
+    if(taken&&String(taken.id)!==String(req.params.id))return res.status(400).json({error:"This domain is already assigned to another company"});
+  }
+  const r=await db.prepare("UPDATE companies SET custom_domain=? WHERE id=?").run(d||null,req.params.id);
+  if(r.changes===0)return res.status(404).json({error:"Company not found"});
+  await audit(req,"DOMAIN","COMPANY",`${req.params.id}: ${d||"(cleared)"}`);
+  res.json({ok:true,domain:d||null});
 }));
 app.get("/api/email-settings",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const c=await db.prepare("SELECT smtp_user FROM companies WHERE id=?").get(req.user.company_id);
