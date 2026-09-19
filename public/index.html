@@ -913,7 +913,7 @@ async function toggleEmpStatus(id,cur){
 }
 function loginResult(r,what){
   const mail=r.emailed?"The login details were also emailed to the employee.":(r.hasEmail===false?"There is no email address on file, so please share the details yourself.":"The email could not be sent"+(r.emailError?` (${r.emailError})`:"")+". Please share the details yourself.");
-  return uiAlert(`${what}\n\nUsername: ${r.username}\nTemporary password: ${r.temp_password}\n\n${mail}`);
+  return uiAlert(`${what}\n\nUsername: ${r.username}\nTemporary password: ${r.temp_password}\n\n${mail}`,"info");
 }
 async function createLogin(id){
   if(!await uiConfirm("Create a self-service login for this employee? A temporary password will be generated and emailed to them if an email address is on file.",{title:"Create employee login",okText:"Create Login"}))return;
