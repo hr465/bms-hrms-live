@@ -128,9 +128,10 @@ for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT","last_seen T
 for(const col of ["email TEXT"]){
   try{await db.exec(`ALTER TABLE users ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT","custom_domain TEXT"]){
+for(const col of ["work_timing TEXT","smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT","custom_domain TEXT"]){
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
 }
+try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){}
 for(const col of ["reviewer TEXT","finalized_at TEXT","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
   try{await db.exec(`ALTER TABLE performance ADD COLUMN ${col}`)}catch(e){}
 }
@@ -807,13 +808,76 @@ app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),
   catch(e){res.status(400).json({error:"Department already exists"})}
 }));
 
+/* ---------------- Work timing (company default + per-employee override) ---------------- */
+const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00"};
+const HHMM=/^([01]\d|2[0-3]):[0-5]\d$/;
+function cleanTiming(x,partial){
+  const o={};
+  for(const k of ["start","end","break_start","break_end"])if(x?.[k]!==undefined&&x[k]!==""){if(!HHMM.test(x[k]))throw new Error("Time must be in HH:MM format");o[k]=x[k]}
+  if(x?.grace!==undefined&&x.grace!==""){const g=Number(x.grace);if(!(g>=0&&g<=120))throw new Error("Grace minutes must be between 0 and 120");o.grace=g}
+  if(x?.break_on!==undefined)o.break_on=!!x.break_on;
+  if(!partial&&(!o.start||!o.end))throw new Error("Start and close time are required");
+  return o;
+}
+function parseJSON(t){try{return JSON.parse(t||"")||{}}catch{return {}}}
+function timingFor(company,emp){return {...DEFAULT_TIMING,...parseJSON(company?.work_timing),...parseJSON(emp?.work_timing)}}
+const toMin=t=>{const [h,m]=String(t).split(":").map(Number);return h*60+m};
+function dayMetrics(t,firstIn,lastOut){
+  const r={late_minutes:0,worked_minutes:0,overtime_minutes:0};
+  if(!firstIn||firstIn.length<16)return r;
+  const inM=toMin(firstIn.slice(11,16));
+  r.late_minutes=Math.max(0,inM-(toMin(t.start)+Number(t.grace||0)));
+  if(lastOut&&lastOut.length>=16){
+    let w=toMin(lastOut.slice(11,16))-inM;
+    const bLen=t.break_on?Math.max(0,toMin(t.break_end)-toMin(t.break_start)):0;
+    if(t.break_on&&inM<toMin(t.break_start)&&toMin(lastOut.slice(11,16))>toMin(t.break_end))w-=bLen;
+    r.worked_minutes=Math.max(0,w);
+    const std=toMin(t.end)-toMin(t.start)-bLen;
+    r.overtime_minutes=Math.max(0,w-std);
+  }
+  return r;
+}
+app.get("/api/work-timing",auth,requireCompany,wrap(async(req,res)=>{
+  const c=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
+  res.json(timingFor(c,null));
+}));
+app.post("/api/work-timing",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  let o;try{o=cleanTiming(req.body,false)}catch(e){return res.status(400).json({error:e.message})}
+  if(toMin(o.end)<=toMin(o.start))return res.status(400).json({error:"Close time must be after start time"});
+  const full={...DEFAULT_TIMING,...o};
+  if(full.break_on&&toMin(full.break_end)<=toMin(full.break_start))return res.status(400).json({error:"Break end must be after break start"});
+  await db.prepare("UPDATE companies SET work_timing=? WHERE id=?").run(JSON.stringify(full),req.user.company_id);
+  await audit(req,"UPDATE","WORK_TIMING",String(req.user.company_id));res.json({ok:true});
+}));
+// Per-employee override: body {use_default:true} clears it; otherwise partial fields are stored.
+app.post("/api/employees/:id/work-timing",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  let v=null;
+  if(!req.body.use_default){
+    try{v=JSON.stringify(cleanTiming(req.body,true))}catch(e){return res.status(400).json({error:e.message})}
+  }
+  const r=await db.prepare("UPDATE employees SET work_timing=? WHERE id=? AND company_id=?").run(v,req.params.id,req.user.company_id);
+  if(r.changes===0)return res.status(404).json({error:"Employee not found"});
+  await audit(req,"UPDATE","EMP_TIMING",String(req.params.id));res.json({ok:true});
+}));
+app.get("/api/employees/:id/work-timing",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const e=await db.prepare("SELECT work_timing FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!e)return res.status(404).json({error:"Employee not found"});
+  const c=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
+  res.json({custom:!!e.work_timing,effective:timingFor(c,e),override:parseJSON(e.work_timing)});
+}));
+
 app.get("/api/attendance",auth,requireCompany,wrap(async(req,res)=>{
-  let q=`SELECT a.*,e.employee_code,e.name,e.department FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=?`;
+  let q=`SELECT a.*,e.employee_code,e.name,e.department,e.work_timing AS emp_timing FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=?`;
   let params=[req.user.company_id];
   if(req.user.role==="Employee"){q+=" AND e.id=?";params.push(req.user.employee_id)}
   else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";params.push(req.user.employee_id,req.user.employee_id)}
   q+=" ORDER BY a.work_date DESC,a.first_in DESC";
-  res.json(await db.prepare(q).all(...params));
+  const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
+  const rows=await db.prepare(q).all(...params);
+  res.json(rows.map(({emp_timing,...a})=>{
+    if(a.source==="Manual"&&(a.late_minutes||a.overtime_minutes))return a;
+    return {...a,...dayMetrics(timingFor(co,{work_timing:emp_timing}),a.first_in,a.last_out)};
+  }));
 }));
 app.post("/api/attendance/manual",auth,requireCompany,wrap(async(req,res)=>{
   const employeeId=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);

@@ -357,6 +357,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <section id="audit" class="page"><div class="pagehead"><h2>Audit Log</h2></div><div class="searchbar"><input id="auditSearch" placeholder="Search user / action / module..." oninput="renderAudit()"></div><div id="auditTable" class="tblwrap"></div></section>
 <section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
 <div class="panel"><h3>Company profile</h3><p class="small" style="margin-bottom:10px">These details appear on letters and emails. The company name and web address are managed by the platform administrator.</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Industry</label><input id="cpIndustry"></div><div class="field"><label>Contact phone</label><input id="cpPhone"></div></div><div class="field"><label>Address</label><input id="cpAddress"></div><div class="field"><label>Contact email</label><input id="cpEmail" placeholder="hr@company.com"></div><button onclick="saveCompanyProfile()">Save profile</button></div>
+<div class="panel"><h3>Working hours</h3><p class="small" style="margin-bottom:10px">Company default. Late marks, worked hours and overtime are calculated from these. Individual employees can have their own timing from the Employees page.</p><div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div class="field"><label>Start time</label><input id="wtStart" type="time"></div><div class="field"><label>Close time</label><input id="wtEnd" type="time"></div><div class="field"><label>Grace (minutes)</label><input id="wtGrace" type="number" min="0" max="120"></div></div><label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="wtBreakOn" onchange="$('wtBreakRow').style.display=this.checked?'grid':'none'"> Deduct break time</label><div class="grid" id="wtBreakRow" style="grid-template-columns:1fr 1fr"><div class="field"><label>Break start</label><input id="wtBs" type="time"></div><div class="field"><label>Break end</label><input id="wtBe" type="time"></div></div><button onclick="saveWorkTiming()">Save working hours</button></div>
 <div class="panel"><h3>Email Settings</h3><p class="small" id="emailSettingsStatus">Loading...</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Sender Gmail</label><input id="esUser" placeholder="companyhr@gmail.com"></div><div class="field"><label>App Password</label><input id="esPass" type="password" placeholder="16-char app password (leave blank to keep current)"></div></div><button onclick="saveEmailSettings()">Save</button><p class="small" style="margin-top:10px">Used to send announcements, payslips and login emails to this company's employees. Leave both blank to use the platform default sender.</p></div>
 <div class="panel"><h3>Policy Agreement</h3><p class="small" style="margin-bottom:10px">This text is used whenever you generate a new onboarding agreement for an employee (Agreements page). Editing it only affects future agreements, not ones already in progress.</p><textarea id="policyText" style="min-height:220px"></textarea><div class="actions" style="margin-top:10px"><button onclick="savePolicyText()">Save</button></div></div>
 </section>
@@ -406,6 +407,13 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="compErr" class="err"></div>
 <div class="actions"><button onclick="submitCompany()">Onboard Company</button><button class="gray" onclick="$('compModal').classList.remove('show')">Cancel</button></div>
 </div></div>
+
+<div class="modalbg" id="empTimingModal"><div class="modal" style="max-width:520px"><h3 id="etTitle">Employee timing</h3>
+<label style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input type="checkbox" id="etDefault" onchange="etToggle()"> Use company default timing</label>
+<div id="etFields"><div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div class="field"><label>Start time</label><input id="etStart" type="time"></div><div class="field"><label>Close time</label><input id="etEnd" type="time"></div><div class="field"><label>Grace (min)</label><input id="etGrace" type="number" min="0" max="120"></div></div>
+<label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="etBreakOn"> Deduct break time</label>
+<div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Break start</label><input id="etBs" type="time"></div><div class="field"><label>Break end</label><input id="etBe" type="time"></div></div></div>
+<div id="etErr" class="err"></div><div class="actions" style="margin-top:12px"><button onclick="saveEmpTiming()">Save</button><button class="gray" onclick="$('empTimingModal').classList.remove('show')">Cancel</button></div></div></div>
 
 <div class="modalbg" id="editCompModal"><div class="modal" style="max-width:560px">
 <h3>Edit company</h3>
@@ -714,7 +722,7 @@ async function loadPage(id){
   if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();}
   if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);loadUnregistered();if(!$("editDeviceId").value)onBioModeChange();}
   if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
-  if(id==="settings"){loadCompanyProfile();loadEmailSettings();loadPolicyText();}
+  if(id==="settings"){loadWorkTiming();loadCompanyProfile();loadEmailSettings();loadPolicyText();}
   if(id==="agreements"){await loadAgreements();}
   if(id==="calendar"){await loadCalendar();}
   if(id==="team"){await loadTeam();}
@@ -833,7 +841,7 @@ function renderEmployees(){
   const rows=filterRows(PAGEDATA.employees||[],["employee_code","name","department","designation","branch"],q);
   $("empCount").textContent=`(${rows.length} of ${(PAGEDATA.employees||[]).length})`;
   table("empTable",["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),esc(e.name),esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),statusBadge(e.status),
-    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button><button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
+    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="openEmpTiming(${e.id})">Timing</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button><button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
 }
 
 /* ---------- Attendance ---------- */
@@ -846,7 +854,8 @@ function renderAttendance(){
   if(needsCompany("attTable"))return;
   const q=$("attSearch").value;
   const rows=filterRows((PAGEDATA.attendance||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","work_date","department"],q);
-  table("attTable",["Date","Employee","Dept","First In","Last Out","Status","Source"],rows.map(a=>[a.work_date,esc(a.employee_code+" - "+a.name),esc(a.department),a.first_in||"-",a.last_out||"-",statusBadge(a.status),a.source]));
+  const hm=m=>m?Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m":"-";
+  table("attTable",["Date","Employee","Dept","First In","Last Out","Late","Worked","Overtime","Status","Source"],rows.map(a=>[a.work_date,esc(a.employee_code+" - "+a.name),esc(a.department),a.first_in||"-",a.last_out||"-",a.late_minutes?a.late_minutes+" min":"-",hm(a.worked_minutes),hm(a.overtime_minutes),statusBadge(a.status),a.source]));
 }
 
 /* ---------- Leave ---------- */
@@ -1356,6 +1365,34 @@ function renderAudit(){
   const q=$("auditSearch").value;
   const rows=filterRows(PAGEDATA.audit||[],["username","action","module","details"],q);
   table("auditTable",["User","Action","Module","Details","Time"],rows.map(a=>[esc(a.username||"-"),a.action,a.module,esc(a.details),a.created_at]));
+}
+
+/* ---------- Working hours ---------- */
+async function loadWorkTiming(){
+  try{
+    const t=await api("/api/work-timing");
+    $("wtStart").value=t.start;$("wtEnd").value=t.end;$("wtGrace").value=t.grace;$("wtBreakOn").checked=!!t.break_on;$("wtBs").value=t.break_start;$("wtBe").value=t.break_end;
+    $("wtBreakRow").style.display=t.break_on?"grid":"none";
+  }catch(e){}
+}
+async function saveWorkTiming(){
+  try{await api("/api/work-timing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({start:$("wtStart").value,end:$("wtEnd").value,grace:$("wtGrace").value,break_on:$("wtBreakOn").checked,break_start:$("wtBs").value,break_end:$("wtBe").value})});alert("Working hours have been saved.")}catch(e){alert(e.message)}
+}
+let ET_ID=null;
+function etToggle(){$("etFields").style.opacity=$("etDefault").checked?".45":"1";$("etFields").querySelectorAll("input").forEach(i=>i.disabled=$("etDefault").checked)}
+async function openEmpTiming(id){
+  ET_ID=id;const e=(PAGEDATA.employees||[]).find(x=>x.id===id);
+  try{
+    const r=await api(`/api/employees/${id}/work-timing`),t=r.effective;
+    $("etTitle").textContent="Timing — "+(e?e.name:"Employee");$("etErr").textContent="";
+    $("etDefault").checked=!r.custom;
+    $("etStart").value=t.start;$("etEnd").value=t.end;$("etGrace").value=t.grace;$("etBreakOn").checked=!!t.break_on;$("etBs").value=t.break_start;$("etBe").value=t.break_end;
+    etToggle();$("empTimingModal").classList.add("show");
+  }catch(err){alert(err.message)}
+}
+async function saveEmpTiming(){
+  const body=$("etDefault").checked?{use_default:true}:{start:$("etStart").value,end:$("etEnd").value,grace:$("etGrace").value,break_on:$("etBreakOn").checked,break_start:$("etBs").value,break_end:$("etBe").value};
+  try{await api(`/api/employees/${ET_ID}/work-timing`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("empTimingModal").classList.remove("show");alert("Employee timing has been saved.")}catch(e){$("etErr").textContent=e.message}
 }
 
 /* ---------- Company profile (Settings) ---------- */
