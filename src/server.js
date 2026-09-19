@@ -664,8 +664,13 @@ app.post("/api/employees/:id/agreements",auth,requireCompany,roles("Super Admin"
   if(!company?.policy_agreement_text?.trim())return res.status(400).json({error:"Set up the company's Policy Agreement text first (HR Policies page)"});
   const existing=await db.prepare("SELECT id FROM agreements WHERE employee_id=? AND company_id=? AND status<>'Completed'").get(emp.id,req.user.company_id);
   if(existing)return res.status(400).json({error:"This employee already has an agreement in progress"});
+  const co2=await db.prepare("SELECT name,address FROM companies WHERE id=?").get(req.user.company_id);
+  const mgr=emp.reporting_manager_id?await db.prepare("SELECT name FROM employees WHERE id=?").get(emp.reporting_manager_id):null;
+  const vals={employee_name:emp.name,employee_code:emp.employee_code,designation:emp.designation,department:emp.department,branch:emp.branch,
+    reporting_manager:mgr?.name||emp.manager,joining_date:fmtDate(emp.joining_date),company_name:co2?.name,company_address:co2?.address,issue_date:fmtDate(new Date())};
+  const agreementText=company.policy_agreement_text.replace(/\{\{\s*(\w+)\s*\}\}/g,(m,k)=>vals[k]!=null&&vals[k]!==""?String(vals[k]):m);
   const r=await db.prepare("INSERT INTO agreements(company_id,employee_id,title,content,status) VALUES(?,?,?,?,?)")
-    .run(req.user.company_id,emp.id,`Company Policy Agreement — ${emp.name}`,company.policy_agreement_text,"Pending Employee");
+    .run(req.user.company_id,emp.id,`Company Policy Agreement — ${emp.name}`,agreementText,"Pending Employee");
   await audit(req,"CREATE","AGREEMENT",emp.employee_code);
   res.json({id:r.lastInsertRowid});
   notifyAgreementStep(req.user.company_id,emp.id,"Pending Employee").catch(e=>console.error("agreement mail",e.message));
