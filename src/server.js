@@ -400,6 +400,17 @@ app.get("/api/employees",auth,requireCompany,wrap(async(req,res)=>{
   else if(req.user.role==="Manager" && req.user.employee_id) rows=rows.filter(x=>x.reporting_manager_id===req.user.employee_id || x.id===req.user.employee_id);
   res.json(rows);
 }));
+// When an employee is created or given a Biometric ID after the device has already sent punches,
+// rebuild their attendance from the punches already stored (last 45 days).
+async function backfillFromPunches(companyId,biometricId){
+  const bid=String(biometricId||"").trim();
+  if(!bid)return;
+  try{
+    const cut=new Date(Date.now()-45*86400000).toISOString().slice(0,19);
+    const rows=await db.prepare("SELECT biometric_id,punch_time FROM punches WHERE company_id=? AND biometric_id=? AND punch_time>=?").all(companyId,bid,cut);
+    if(rows.length)await ingestBatch(companyId,null,rows);
+  }catch(e){console.error("Attendance backfill failed:",e.message)}
+}
 function friendlyDupError(e){
   const m=e.message||"";
   const map={ux_emp_pf:"PF Number",ux_emp_esic:"ESIC Number",ux_emp_uan:"UAN Number",ux_emp_pan:"PAN Number",ux_emp_bio:"Biometric ID"};
@@ -413,6 +424,7 @@ app.post("/api/employees",auth,requireCompany,roles("Super Admin","HR Admin"),wr
     const r=await db.prepare(`INSERT INTO employees(company_id,employee_code,name,email,phone,department,designation,manager,reporting_manager_id,branch,joining_date,status,biometric_id,salary,bank_name,bank_account,ifsc,pf_number,esic_number,uan_number,pan_number,date_of_birth,basic_salary,hra,other_allowances,pf_applicable,esic_applicable)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.company_id,x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.reporting_manager_id||null,x.branch,x.joining_date,x.status||"Active",x.biometric_id||null,x.salary||0,x.bank_name,x.bank_account,x.ifsc,x.pf_number||null,x.esic_number||null,x.uan_number||null,x.pan_number||null,x.date_of_birth||null,x.basic_salary||0,x.hra||0,x.other_allowances||0,+!!x.pf_applicable,+!!x.esic_applicable);
     await db.prepare("INSERT OR IGNORE INTO onboarding(company_id,employee_id) VALUES(?,?)").run(req.user.company_id,r.lastInsertRowid);
+    await backfillFromPunches(req.user.company_id,x.biometric_id);
     await audit(req,"CREATE","EMPLOYEE",x.employee_code);res.json({id:r.lastInsertRowid});
   }catch(e){res.status(400).json({error:friendlyDupError(e)})}
 }));
@@ -422,6 +434,7 @@ app.put("/api/employees/:id",auth,requireCompany,roles("Super Admin","HR Admin")
     const r=await db.prepare(`UPDATE employees SET employee_code=?,name=?,email=?,phone=?,department=?,designation=?,manager=?,reporting_manager_id=?,branch=?,joining_date=?,status=?,biometric_id=?,salary=?,bank_name=?,bank_account=?,ifsc=?,pf_number=?,esic_number=?,uan_number=?,pan_number=?,date_of_birth=?,basic_salary=?,hra=?,other_allowances=?,pf_applicable=?,esic_applicable=? WHERE id=? AND company_id=?`)
       .run(x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.reporting_manager_id||null,x.branch,x.joining_date,x.status||"Active",x.biometric_id||null,x.salary||0,x.bank_name,x.bank_account,x.ifsc,x.pf_number||null,x.esic_number||null,x.uan_number||null,x.pan_number||null,x.date_of_birth||null,x.basic_salary||0,x.hra||0,x.other_allowances||0,+!!x.pf_applicable,+!!x.esic_applicable,req.params.id,req.user.company_id);
     if(r.changes===0)return res.status(404).json({error:"Employee not found"});
+    await backfillFromPunches(req.user.company_id,x.biometric_id);
     await audit(req,"UPDATE","EMPLOYEE",x.employee_code);res.json({ok:true});
   }catch(e){res.status(400).json({error:friendlyDupError(e)})}
 }));
