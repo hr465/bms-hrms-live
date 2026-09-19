@@ -128,7 +128,7 @@ for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT","last_seen T
 for(const col of ["email TEXT"]){
   try{await db.exec(`ALTER TABLE users ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["work_timing TEXT","smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT","custom_domain TEXT"]){
+for(const col of ["last_digest TEXT","work_timing TEXT","smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT","custom_domain TEXT"]){
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
 }
 try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){}
@@ -809,13 +809,14 @@ app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),
 }));
 
 /* ---------------- Work timing (company default + per-employee override) ---------------- */
-const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00"};
+const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true};
 const HHMM=/^([01]\d|2[0-3]):[0-5]\d$/;
 function cleanTiming(x,partial){
   const o={};
   for(const k of ["start","end","break_start","break_end"])if(x?.[k]!==undefined&&x[k]!==""){if(!HHMM.test(x[k]))throw new Error("Time must be in HH:MM format");o[k]=x[k]}
   if(x?.grace!==undefined&&x.grace!==""){const g=Number(x.grace);if(!(g>=0&&g<=120))throw new Error("Grace minutes must be between 0 and 120");o.grace=g}
-  if(x?.break_on!==undefined)o.break_on=!!x.break_on;
+  if(x?.min_hours!==undefined&&x.min_hours!==""){const h=Number(x.min_hours);if(!(h>=0&&h<=16))throw new Error("Minimum hours must be between 0 and 16");o.min_hours=h}
+  for(const k of ["break_on","notify_low_hours","notify_late"])if(x?.[k]!==undefined)o[k]=!!x[k];
   if(!partial&&(!o.start||!o.end))throw new Error("Start and close time are required");
   return o;
 }
@@ -837,6 +838,80 @@ function dayMetrics(t,firstIn,lastOut){
   }
   return r;
 }
+/* ---------------- Email notifications: leave, late arrival, minimum hours ---------------- */
+function esc2(v){return String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+async function seniorEmails(companyId){
+  const rows=await db.prepare("SELECT e.email FROM users u JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.active=1 AND u.role IN ('HR Admin','Director') AND e.email IS NOT NULL AND e.email<>''").all(companyId);
+  const c=await db.prepare("SELECT contact_email FROM companies WHERE id=?").get(companyId);
+  return [...new Set([...rows.map(r=>r.email),c?.contact_email].filter(Boolean))];
+}
+async function notifyLeaveApplied(companyId,empId,x){
+  const emp=await db.prepare("SELECT name,employee_code,reporting_manager_id FROM employees WHERE id=?").get(empId);
+  if(!emp)return;
+  const mgr=emp.reporting_manager_id?await db.prepare("SELECT email FROM employees WHERE id=?").get(emp.reporting_manager_id):null;
+  const to=[...new Set([mgr?.email,...await seniorEmails(companyId)].filter(Boolean))];
+  if(!to.length)return;
+  const sender=await companySender(companyId);
+  const label=x.category==="WFH"?"work from home":x.category==="Permission"?"permission":"leave";
+  const row=(k,v)=>`<tr><td style="padding:4px 12px 4px 0;color:#64748b">${k}</td><td>${esc2(v)}</td></tr>`;
+  const html=layout(`New ${label} request`,`<p><b>${esc2(emp.name)}</b> (${esc2(emp.employee_code)}) has applied for ${label}.</p>
+   <table style="border-collapse:collapse;font-size:14px">${row("Type",x.leave_type||x.category)}${row("From",x.from_date)}${row("To",x.to_date)}${row("Days",x.days||1)}${row("Reason",x.reason||"-")}</table>
+   <p style="margin-top:14px">Please review it in the HR portal.</p>`);
+  for(const t of to)await sendMail(t,`${emp.name} applied for ${label}`,html,sender);
+}
+async function notifyLeaveDecision(companyId,leaveId,status,by){
+  const l=await db.prepare("SELECT l.*,e.email,e.name FROM leave_requests l JOIN employees e ON e.id=l.employee_id WHERE l.id=? AND l.company_id=?").get(leaveId,companyId);
+  if(!l?.email)return;
+  const sender=await companySender(companyId);
+  await sendMail(l.email,`Your request was ${String(status).toLowerCase()}`,layout(`Request ${status}`,
+    `<p>Hi ${esc2(l.name)}, your ${esc2(l.leave_type||l.category)} request (${esc2(l.from_date)} to ${esc2(l.to_date)}) has been <b>${esc2(status)}</b> by ${esc2(by)}.</p>`),sender);
+}
+const fmtHM=m=>Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";
+function istNow(){
+  const p=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(new Date()).map(x=>[x.type,x.value]));
+  return {date:`${p.year}-${p.month}-${p.day}`,minutes:(+p.hour%24)*60+ +p.minute};
+}
+// Builds the day's late / short-hours lists and emails them to HR and directors.
+async function sendDailyDigest(companyId,date,force){
+  const co=await db.prepare("SELECT id,name,work_timing,smtp_user,smtp_pass FROM companies WHERE id=?").get(companyId);
+  const base=timingFor(co,null);
+  if(!force&&!base.notify_low_hours&&!base.notify_late)return {sent:0,reason:"Notifications are off"};
+  const rows=await db.prepare("SELECT a.first_in,a.last_out,e.name,e.employee_code,e.work_timing FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? AND a.work_date=? AND e.status='Active'").all(companyId,date);
+  const late=[],low=[];
+  for(const r of rows){
+    const t=timingFor(co,r),m=dayMetrics(t,r.first_in,r.last_out);
+    if((force||base.notify_late)&&m.late_minutes>0)late.push({...r,m});
+    if((force||base.notify_low_hours)&&Number(t.min_hours)>0){
+      const need=Math.round(t.min_hours*60);
+      if(!r.last_out)low.push({...r,m,note:"No check-out recorded",need});
+      else if(m.worked_minutes<need)low.push({...r,m,note:fmtHM(m.worked_minutes),need});
+    }
+  }
+  if(!late.length&&!low.length)return {sent:0,late:0,low:0,reason:"Nothing to report for today"};
+  const tbl=(head,items)=>`<table style="border-collapse:collapse;width:100%;font-size:13px;margin:8px 0 18px"><tr>${head.map(h=>`<th style="text-align:left;padding:6px;border:1px solid #e5e7eb;background:#f8fafc">${h}</th>`).join("")}</tr>${items.map(r=>`<tr>${r.map(c=>`<td style="padding:6px;border:1px solid #e5e7eb">${c}</td>`).join("")}</tr>`).join("")}</table>`;
+  const html=layout(`Attendance summary — ${date}`,
+    (late.length?`<h3 style="margin:10px 0 0">Late arrivals (${late.length})</h3>`+tbl(["Employee","First in","Late by"],late.map(r=>[esc2(r.employee_code+" - "+r.name),esc2((r.first_in||"").slice(11,16)),r.m.late_minutes+" min"])):"")+
+    (low.length?`<h3 style="margin:10px 0 0">Minimum working hours not completed (${low.length})</h3>`+tbl(["Employee","Worked","Required"],low.map(r=>[esc2(r.employee_code+" - "+r.name),esc2(r.note),fmtHM(r.need)])):""));
+  const to=await seniorEmails(companyId),sender={name:co.name,smtp_user:co.smtp_user,smtp_pass:co.smtp_pass};
+  for(const t of to)await sendMail(t,`Attendance summary ${date} — ${co.name}`,html,sender);
+  return {sent:to.length,late:late.length,low:low.length};
+}
+app.post("/api/work-timing/send-digest",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  res.json(await sendDailyDigest(req.user.company_id,istNow().date,true));
+}));
+// Once a day, 30 minutes after office close (IST), per company.
+async function digestTick(){
+  const now=istNow();
+  const cos=await db.prepare("SELECT id,work_timing,last_digest FROM companies").all();
+  for(const c of cos){
+    if(c.last_digest===now.date||new Date(now.date+"T00:00:00Z").getUTCDay()===0)continue;
+    if(now.minutes<toMin(timingFor(c,null).end)+30)continue;
+    const r=await db.prepare("UPDATE companies SET last_digest=? WHERE id=? AND (last_digest IS NULL OR last_digest<>?)").run(now.date,c.id,now.date);
+    if(r.changes)await sendDailyDigest(c.id,now.date,false).catch(e=>console.error("digest",e.message));
+  }
+}
+setInterval(()=>digestTick().catch(e=>console.error("digest tick",e.message)),10*60*1000);
+
 app.get("/api/work-timing",auth,requireCompany,wrap(async(req,res)=>{
   const c=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
   res.json(timingFor(c,null));
@@ -876,7 +951,8 @@ app.get("/api/attendance",auth,requireCompany,wrap(async(req,res)=>{
   const rows=await db.prepare(q).all(...params);
   res.json(rows.map(({emp_timing,...a})=>{
     if(a.source==="Manual"&&(a.late_minutes||a.overtime_minutes))return a;
-    return {...a,...dayMetrics(timingFor(co,{work_timing:emp_timing}),a.first_in,a.last_out)};
+    const t=timingFor(co,{work_timing:emp_timing});
+    return {...a,...dayMetrics(t,a.first_in,a.last_out),min_minutes:Math.round(Number(t.min_hours||0)*60)};
   }));
 }));
 app.post("/api/attendance/manual",auth,requireCompany,wrap(async(req,res)=>{
@@ -906,11 +982,13 @@ app.post("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
   const r=await db.prepare(`INSERT INTO leave_requests(company_id,employee_id,leave_type,from_date,to_date,days,reason,category) VALUES(?,?,?,?,?,?,?,?)`)
     .run(req.user.company_id,eid,req.body.leave_type,req.body.from_date,req.body.to_date,Number(req.body.days)||1,req.body.reason||"",category);
   await audit(req,"CREATE","LEAVE",String(r.lastInsertRowid));res.json({id:r.lastInsertRowid});
+  notifyLeaveApplied(req.user.company_id,eid,{category,...req.body}).catch(e=>console.error("leave notify",e.message));
 }));
 app.post("/api/leaves/:id/status",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>{
   const r=await db.prepare("UPDATE leave_requests SET status=?,approved_by=? WHERE id=? AND company_id=?").run(req.body.status,req.user.username,req.params.id,req.user.company_id);
   if(r.changes===0)return res.status(404).json({error:"Leave request not found"});
   await audit(req,req.body.status,"LEAVE",req.params.id);res.json({ok:true});
+  notifyLeaveDecision(req.user.company_id,req.params.id,req.body.status,req.user.username).catch(e=>console.error("leave notify",e.message));
 }));
 app.get("/api/leaves/balance",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.query.employee_id||req.user.employee_id);
