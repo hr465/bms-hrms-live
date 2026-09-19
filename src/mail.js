@@ -19,7 +19,7 @@ function getTransporter(user, pass) {
 
 // `sender` is an optional {smtp_user, smtp_pass} — typically a company row. Falls back to the
 // platform default account when the company hasn't configured its own.
-async function sendMail(to, subject, html, sender) {
+async function sendMail(to, subject, html, sender, attachments) {
   if (!to) return;
   const user = sender?.smtp_user || defaultUser;
   const pass = sender?.smtp_pass || defaultPass;
@@ -29,7 +29,8 @@ async function sendMail(to, subject, html, sender) {
     return;
   }
   try {
-    await transporter.sendMail({ from: `"${sender?.name ? sender.name + " · " : ""}${fromName}" <${user}>`, to, subject, html });
+    await transporter.sendMail({ from: `"${sender?.name ? sender.name + " · " : ""}${fromName}" <${user}>`, to, subject, html, attachments });
+    return true;
   } catch (e) {
     console.error("Failed to send email to", to, e.message);
   }

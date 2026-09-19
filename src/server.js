@@ -18,7 +18,11 @@ await db.exec(`
 CREATE TABLE IF NOT EXISTS companies(
  id SERIAL PRIMARY KEY, name TEXT NOT NULL, code TEXT UNIQUE NOT NULL, industry TEXT,
  address TEXT, contact_email TEXT, contact_phone TEXT, status TEXT DEFAULT 'Active', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
- smtp_user TEXT, smtp_pass TEXT, policy_agreement_text TEXT, increment_policy TEXT
+ smtp_user TEXT, smtp_pass TEXT, policy_agreement_text TEXT, increment_policy TEXT, letter_template TEXT
+);
+CREATE TABLE IF NOT EXISTS letters(
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,letter_type TEXT DEFAULT 'Appointment Letter',
+ ref_no TEXT,content TEXT,issued_by TEXT,issued_at TEXT DEFAULT CURRENT_TIMESTAMP,emailed_at TEXT
 );
 CREATE TABLE IF NOT EXISTS users(
  id SERIAL PRIMARY KEY, company_id INTEGER, username TEXT UNIQUE, password_hash TEXT,
@@ -124,7 +128,7 @@ for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT"]){
 for(const col of ["email TEXT"]){
   try{await db.exec(`ALTER TABLE users ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT"]){
+for(const col of ["smtp_user TEXT","smtp_pass TEXT","policy_agreement_text TEXT","increment_policy TEXT","letter_template TEXT"]){
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
 }
 for(const col of ["reviewer TEXT","finalized_at TEXT","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
@@ -564,6 +568,176 @@ app.post("/api/agreements/:id/sign",auth,requireCompany,wrap(async(req,res)=>{
 }));
 
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+
+/* ---------------- Letters (appointment letter with PDF + email) ---------------- */
+const PDFDocument=require("pdfkit");
+const LETTER_PLACEHOLDERS=["employee_name","employee_code","designation","department","branch","reporting_manager","joining_date","monthly_ctc","annual_ctc","basic_monthly","hra_monthly","other_allowances_monthly","company_name","company_address","issue_date","ref_no"];
+const DEFAULT_LETTER_TEMPLATE=`Ref: {{ref_no}}
+Date: {{issue_date}}
+
+To,
+{{employee_name}}
+Employee Code: {{employee_code}}
+
+Subject: Letter of Appointment
+
+Dear {{employee_name}},
+
+We are pleased to appoint you at {{company_name}} on the terms set out below.
+
+## Position details
+Designation: {{designation}}
+Department: {{department}}
+Work location: {{branch}}
+Reporting to: {{reporting_manager}}
+Date of joining: {{joining_date}}
+
+## Compensation
+Your monthly gross compensation will be Rs. {{monthly_ctc}} (Rs. {{annual_ctc}} per annum), structured as follows:
+Basic salary: Rs. {{basic_monthly}} per month
+House rent allowance: Rs. {{hra_monthly}} per month
+Other allowances: Rs. {{other_allowances_monthly}} per month
+Statutory deductions such as Provident Fund, ESIC and income tax (TDS) will be applied as per applicable law.
+
+## Terms of employment
+1. You are expected to follow the company's policies, code of conduct and confidentiality obligations.
+2. This appointment is subject to satisfactory verification of the documents and information you have provided.
+3. Either party may end the employment by giving notice as per company policy.
+
+Please sign the duplicate copy of this letter as a token of your acceptance of these terms.
+
+We welcome you to {{company_name}} and look forward to a long and successful association.
+
+Yours sincerely,
+For {{company_name}}
+
+
+Authorized Signatory`;
+const fmtDate=d=>{const x=new Date(d);return isNaN(x)?String(d||""):x.toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"})};
+const fmtNum=n=>Math.round(Number(n)||0).toLocaleString("en-IN");
+async function getLetterTemplate(companyId){
+  const c=await db.prepare("SELECT letter_template FROM companies WHERE id=?").get(companyId);
+  return (c?.letter_template&&c.letter_template.trim())?c.letter_template:DEFAULT_LETTER_TEMPLATE;
+}
+async function buildLetter(companyId,emp,refNo){
+  const company=await db.prepare("SELECT name,code,address FROM companies WHERE id=?").get(companyId);
+  const missing=[];
+  if(!emp.designation)missing.push("designation");
+  if(!emp.joining_date)missing.push("joining date");
+  const basic=Number(emp.basic_salary)||0,hra=Number(emp.hra)||0,other=Number(emp.other_allowances)||0;
+  if(basic+hra+other<=0)missing.push("salary structure (Basic, HRA, Other Allowances)");
+  let manager="";
+  if(emp.reporting_manager_id){const m=await db.prepare("SELECT name FROM employees WHERE id=?").get(emp.reporting_manager_id);manager=m?.name||""}
+  const ctc=basic+hra+other;
+  const values={employee_name:emp.name,employee_code:emp.employee_code,designation:emp.designation,department:emp.department,branch:emp.branch,
+    reporting_manager:manager||emp.manager,joining_date:fmtDate(emp.joining_date),monthly_ctc:fmtNum(ctc),annual_ctc:fmtNum(ctc*12),
+    basic_monthly:fmtNum(basic),hra_monthly:fmtNum(hra),other_allowances_monthly:fmtNum(other),company_name:company?.name,company_address:company?.address,
+    issue_date:fmtDate(new Date()),ref_no:refNo};
+  const tpl=await getLetterTemplate(companyId);
+  const content=tpl.replace(/\{\{\s*(\w+)\s*\}\}/g,(m,k)=>{const v=values[k];return v==null||String(v).trim()===""?"-":String(v)});
+  return {content,missing,company};
+}
+function letterToHtml(content){
+  return content.split("\n").map(line=>{
+    if(line.startsWith("## "))return `<div style="font-weight:700;margin:14px 0 4px">${esc(line.slice(3))}</div>`;
+    return line.trim()===""?`<div style="height:8px"></div>`:`<div>${esc(line)}</div>`;
+  }).join("");
+}
+function buildLetterPdf(company,content){
+  return new Promise((resolve,reject)=>{
+    const doc=new PDFDocument({size:"A4",margins:{top:56,bottom:56,left:64,right:64}});
+    const bufs=[];doc.on("data",b=>bufs.push(b));doc.on("end",()=>resolve(Buffer.concat(bufs)));doc.on("error",reject);
+    doc.font("Helvetica-Bold").fontSize(17).fillColor("#312e81").text(company?.name||"");
+    if(company?.address)doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(company.address);
+    doc.moveDown(0.6);
+    const y=doc.y;doc.moveTo(64,y).lineTo(531,y).lineWidth(1.2).strokeColor("#4f46e5").stroke();
+    doc.moveDown(1);
+    for(const line of content.split("\n")){
+      if(line.startsWith("## ")){doc.moveDown(0.4).font("Helvetica-Bold").fontSize(11).fillColor("#0f172a").text(line.slice(3));}
+      else if(line.trim()===""){doc.moveDown(0.5);}
+      else{doc.font("Helvetica").fontSize(10.5).fillColor("#0f172a").text(line,{lineGap:2});}
+    }
+    doc.end();
+  });
+}
+async function nextRefNo(companyId,code){
+  const yr=new Date().getFullYear();
+  const n=Number((await db.prepare("SELECT COUNT(*) c FROM letters WHERE company_id=? AND issued_at LIKE ?").get(companyId,yr+"%")).c)+1;
+  return `APT/${(code||"CO").toUpperCase()}/${yr}/${String(n).padStart(4,"0")}`;
+}
+async function emailLetter(companyId,emp,letter,pdf){
+  if(!emp.email)return false;
+  const sender=await companySender(companyId);
+  const ok=await sendMail(emp.email,`${letter.letter_type} — ${sender?.name||"Company"}`,layout(letter.letter_type,
+    `<p>Dear ${esc(emp.name)},</p><p>Please find attached your <b>${esc(letter.letter_type)}</b> (Ref: ${esc(letter.ref_no)}).</p>
+     <p>Kindly review it, sign the copy and return it to the HR team. Reach out to HR if you have any questions.</p><p>Regards,<br>HR Team, ${esc(sender?.name||"")}</p>`),
+    sender,[{filename:`${letter.ref_no.replace(/\//g,"-")}.pdf`,content:pdf,contentType:"application/pdf"}]);
+  return !!ok;
+}
+app.get("/api/letter-template",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  res.json({template:await getLetterTemplate(req.user.company_id),defaultTemplate:DEFAULT_LETTER_TEMPLATE,placeholders:LETTER_PLACEHOLDERS});
+}));
+app.post("/api/letter-template",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const t=String(req.body?.template||"").trim();
+  if(!t)return res.status(400).json({error:"The letter template cannot be empty"});
+  if(t.length>20000)return res.status(400).json({error:"The letter template is too long"});
+  const unknown=[...new Set([...t.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m=>m[1]).filter(k=>!LETTER_PLACEHOLDERS.includes(k)))];
+  if(unknown.length)return res.status(400).json({error:"Unknown placeholder(s): "+unknown.map(u=>`{{${u}}}`).join(", ")});
+  await db.prepare("UPDATE companies SET letter_template=? WHERE id=?").run(t===DEFAULT_LETTER_TEMPLATE?null:t,req.user.company_id);
+  await audit(req,"UPDATE","LETTER_TEMPLATE","");res.json({ok:true});
+}));
+app.post("/api/employees/:id/letters/preview",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found"});
+  const co=await db.prepare("SELECT code FROM companies WHERE id=?").get(req.user.company_id);
+  const {content,missing}=await buildLetter(req.user.company_id,emp,await nextRefNo(req.user.company_id,co?.code));
+  res.json({html:letterToHtml(content),missing,hasEmail:!!emp.email});
+}));
+app.post("/api/employees/:id/letters",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found"});
+  const co=await db.prepare("SELECT code FROM companies WHERE id=?").get(req.user.company_id);
+  const ref=await nextRefNo(req.user.company_id,co?.code);
+  const {content,missing,company}=await buildLetter(req.user.company_id,emp,ref);
+  if(missing.length)return res.status(400).json({error:"Please complete the employee's "+missing.join(", ")+" before issuing the letter."});
+  const r=await db.prepare("INSERT INTO letters(company_id,employee_id,letter_type,ref_no,content,issued_by) VALUES(?,?,?,?,?,?)").run(req.user.company_id,emp.id,"Appointment Letter",ref,content,req.user.username);
+  const letter={id:r.lastInsertRowid,letter_type:"Appointment Letter",ref_no:ref};
+  let emailed=false;
+  if(req.body?.send_email!==false){
+    emailed=await emailLetter(req.user.company_id,emp,letter,await buildLetterPdf(company,content));
+    if(emailed)await db.prepare("UPDATE letters SET emailed_at=? WHERE id=?").run(new Date().toISOString(),letter.id);
+  }
+  await audit(req,"ISSUE","LETTER",`${ref} → ${emp.employee_code}`);
+  res.json({ok:true,id:letter.id,ref_no:ref,emailed,hasEmail:!!emp.email});
+}));
+app.get("/api/letters",auth,requireCompany,wrap(async(req,res)=>{
+  let q="SELECT l.id,l.employee_id,l.letter_type,l.ref_no,l.issued_by,l.issued_at,l.emailed_at,e.employee_code,e.name,e.email FROM letters l JOIN employees e ON e.id=l.employee_id WHERE l.company_id=?";const p=[req.user.company_id];
+  if(req.user.role==="Employee"){q+=" AND l.employee_id=?";p.push(req.user.employee_id)}
+  else if(!["Super Admin","HR Admin","Director"].includes(req.user.role))return res.status(403).json({error:"Permission denied"});
+  res.json(await db.prepare(q+" ORDER BY l.id DESC").all(...p));
+}));
+app.get("/api/letters/:id/pdf",auth,requireCompany,wrap(async(req,res)=>{
+  const l=await db.prepare("SELECT * FROM letters WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!l)return res.status(404).json({error:"Letter not found"});
+  if(req.user.role==="Employee"&&l.employee_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
+  if(!["Employee","Super Admin","HR Admin","Director"].includes(req.user.role))return res.status(403).json({error:"Permission denied"});
+  const company=await db.prepare("SELECT name,address FROM companies WHERE id=?").get(req.user.company_id);
+  const pdf=await buildLetterPdf(company,l.content);
+  res.setHeader("Content-Type","application/pdf");
+  res.setHeader("Content-Disposition",`attachment; filename="${l.ref_no.replace(/\//g,"-")}.pdf"`);
+  res.send(pdf);
+}));
+app.post("/api/letters/:id/resend",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const l=await db.prepare("SELECT * FROM letters WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!l)return res.status(404).json({error:"Letter not found"});
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=?").get(l.employee_id);
+  if(!emp?.email)return res.status(400).json({error:"This employee has no email address on file"});
+  const company=await db.prepare("SELECT name,address FROM companies WHERE id=?").get(req.user.company_id);
+  const ok=await emailLetter(req.user.company_id,emp,l,await buildLetterPdf(company,l.content));
+  if(!ok)return res.status(502).json({error:"The email could not be sent. Check the company's email settings."});
+  await db.prepare("UPDATE letters SET emailed_at=? WHERE id=?").run(new Date().toISOString(),l.id);
+  await audit(req,"RESEND","LETTER",l.ref_no);res.json({ok:true});
+}));
 
 app.get("/api/departments",auth,requireCompany,wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM departments WHERE company_id=? ORDER BY name").all(req.user.company_id))));
 app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
@@ -1176,8 +1350,8 @@ app.post("/api/biometric/devices/:id/sync",auth,requireCompany,roles("Super Admi
   }catch(e){
     try{await zk?.disconnect()}catch{}
     const msg=e?.err?.code?`${e.err.code} (${e.command||"connection"} to ${e.ip||device.ip})`:(e?.message||e?.err?.message||String(e));
-    await db.prepare("UPDATE biometric_devices SET status='Not Reachable',last_error=? WHERE id=?").run(msg,device.id);
-    res.status(502).json({error:"Could not connect to device: "+msg});
+    await db.prepare("UPDATE biometric_devices SET last_error=? WHERE id=?").run(msg,device.id);
+    res.status(502).json({error:"Could not connect to the device directly from the server ("+msg+"). If the device is on another network, this is expected: use the Sync Agent installed at that office, which uploads attendance automatically."});
   }
 });
 
@@ -1198,7 +1372,7 @@ app.post("/api/biometric/ingest",wrap(async(req,res)=>{
     if(code)matched++;else unmatched++;
   }
   await db.prepare("UPDATE biometric_devices SET status='Connected',last_sync=?,last_error=NULL WHERE id=?").run(new Date().toISOString(),device.id);
-  await db.prepare("INSERT INTO audit_logs(company_id,user_id,action,module,details) VALUES(?,?,?,?,?)")
+  if(records.length)await db.prepare("INSERT INTO audit_logs(company_id,user_id,action,module,details) VALUES(?,?,?,?,?)")
     .run(device.company_id,null,"SYNC","BIOMETRIC",`${device.name} (agent push): ${records.length} logs, ${matched} matched, ${unmatched} unmatched biometric IDs`);
   res.json({ok:true,received:records.length,matched,unmatched});
 }));

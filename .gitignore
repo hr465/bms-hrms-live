@@ -5,3 +5,4 @@ node_modules/
 bms_hrms.db
 sync-agent.config.json
 .claude/
+sync-agent.state.json

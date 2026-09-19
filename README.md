@@ -35,6 +35,15 @@ npm start
 
 The application listens on `PORT` (default 3000). On first start it creates the schema and a platform administrator account; change its password immediately after signing in.
 
-## Biometric sync agent
+## Biometric sync agent (device in a different city than HR)
 
-For devices on a private network, run `sync-agent.js` on a PC in the same LAN. See `sync-agent.config.example.json` and the Biometric page in the application.
+The portal cannot reach a device that sits on a private office network, so each office runs a small agent that uploads attendance to the portal. HR users in any city then see the data without doing anything.
+
+1. Pick an always-on Windows PC in the same network as the device (for example in the Udaipur office) with internet access. Give the device a fixed IP address.
+2. Install Node.js 22 or newer, copy this project folder to the PC and run `npm install`.
+3. In the portal open Biometric, register the device and choose "Sync Agent Config". Save the shown JSON as `sync-agent.config.json` next to `sync-agent.js`.
+4. Double-click `start-agent.bat`. It restarts itself if it stops. Put a shortcut to it in the Windows Startup folder so it starts on boot.
+
+The first run imports the last 30 days. After that only new punches are sent, every 10 minutes. If the PC or internet is down, the device keeps its logs and the agent uploads everything missed once it is back. The Biometric page shows each device as Online, Delayed or Offline.
+
+Employee Biometric IDs must match the user IDs enrolled on the device.
