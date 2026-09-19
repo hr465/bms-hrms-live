@@ -16,7 +16,10 @@ function getTransporter(user, pass) {
   const key = user + "|" + pass;
   if (transporterCache.has(key)) return transporterCache.get(key);
   const t = nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    family: 4, // hosting platforms often have no IPv6 route (ENETUNREACH)
     auth: { user, pass },
     connectionTimeout: 15000,
     greetingTimeout: 15000,
