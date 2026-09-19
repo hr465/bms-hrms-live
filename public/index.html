@@ -145,6 +145,9 @@ body.printing>*:not(#payslipPrint){display:none!important}
 body.printing #payslipPrint{display:block!important;padding:30px;max-width:650px;margin:auto}
 body.printing #payslipPrint table{width:100%;border-collapse:collapse;margin-top:14px}
 body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #ccc;padding:8px;text-align:left}
+.logo.hasimg{background-size:contain;background-repeat:no-repeat;background-position:center;background-color:#fff;color:transparent}
+.empav{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-size:12px;font-weight:700;overflow:hidden;flex:none}
+.empav img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 </style>
 </head>
 <body>
@@ -383,6 +386,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="modalbg" id="compModal"><div class="modal">
 <h3>Onboard New Company</h3>
 <div class="small" style="margin-bottom:14px">This creates the company workspace and its first HR Admin login in one step.</div>
+<div class="field"><label>Company logo (optional)</label><div style="display:flex;align-items:center;gap:12px"><img id="cmLogoPrev" style="display:none;width:44px;height:44px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff"><button type="button" class="sm gray" onclick="chooseNewLogo()">Choose image</button></div></div>
 <div class="field"><label>Company Name</label><input id="cmName" placeholder="e.g. Acme Textiles Pvt Ltd"></div>
 <div class="grid" style="grid-template-columns:1fr 1fr">
 <div class="field"><label>Short Code</label><input id="cmCode" placeholder="e.g. ACME"></div>
@@ -427,6 +431,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 </div>
 <div class="field"><label>Address</label><input id="ecAddress"></div>
 <div class="field"><label>Contact email</label><input id="ecEmail" placeholder="hr@company.com"></div>
+<div class="field"><label>Company logo</label><div style="display:flex;align-items:center;gap:10px"><img id="ecLogoPrev" style="display:none;width:44px;height:44px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;background:#fff"><button type="button" class="sm gray" onclick="changeCompanyLogo()">Upload new</button><button type="button" class="sm gray" onclick="removeCompanyLogo()">Remove</button></div></div>
 <div class="small" style="margin:12px 0 6px;font-weight:700;color:#334155">Email sender (Gmail used for payslips, letters and notices)</div>
 <div class="grid" style="grid-template-columns:1fr 1fr">
 <div class="field"><label>Sender Gmail</label><input id="ecSmtpUser" placeholder="companyhr@gmail.com"></div>
@@ -602,7 +607,12 @@ function navBuild(){
  }).join("");
  $("whoName").textContent=ME.username;
  $("whoRole").textContent=ME.role;
- $("avatarTxt").textContent=ME.username.slice(0,2).toUpperCase();
+$("avatarTxt").textContent=ME.username.slice(0,2).toUpperCase();
+ $("avatarTxt").style.backgroundImage="";
+ if(ME.employee_id){
+   const av=$("avatarTxt"),im=new Image();im.onload=()=>{av.textContent="";av.style.backgroundImage=`url(/api/images/employee/${ME.employee_id}?v=${IMG_V})`;av.style.backgroundSize="cover";av.style.backgroundPosition="center"};im.src=`/api/images/employee/${ME.employee_id}?v=${IMG_V}`;
+   av.style.cursor="pointer";av.title="Change my photo";av.onclick=()=>changeEmpPhoto(ME.employee_id,true);
+ }
 }
 function page(id){document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));document.querySelectorAll("nav button").forEach(x=>x.classList.remove("sel"));$(id).classList.add("active");const n=$("nav_"+id);if(n)n.classList.add("sel");ensureDownloadBar(id);loadPage(id)}
 
@@ -626,7 +636,7 @@ function applyRoleVisibility(){
 async function refreshMe(){
   const d=await api("/api/me");ME={...d.user};COMPANY=d.company||null;
   $("hdrCompany").textContent=COMPANY?COMPANY.name:"BMS Enterprise HRMS";
-  $("hdrLogo").textContent=COMPANY?(COMPANY.code||COMPANY.name||"HR").replace(/[^A-Za-z0-9]/g,"").slice(0,3).toUpperCase():"BMS";
+  refreshBrand();if(!COMPANY)$("hdrLogo").textContent="BMS";
   $("hdrSub").textContent=COMPANY?(COMPANY.industry||"Company workspace"):"Platform administration";
   if(ME.role==="Super Admin"){
     $("compSwitchWrap").style.display="block";
@@ -734,9 +744,37 @@ async function loadPage(id){
 }
 
 /* ---------- Companies ---------- */
-function openCompanyModal(){["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
+let IMG_V=Date.now();
+function pickImage(maxDim,cb){
+  const i=document.createElement("input");i.type="file";i.accept="image/png,image/jpeg,image/webp";
+  i.onchange=()=>{const f=i.files[0];if(!f)return;
+    const img=new Image(),u=URL.createObjectURL(f);
+    img.onload=()=>{
+      const k=Math.min(1,maxDim/Math.max(img.width,img.height)),c=document.createElement("canvas");
+      c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
+      const x=c.getContext("2d");
+      const png=f.type==="image/png";
+      if(!png){x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height)}
+      x.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);
+      cb(png?c.toDataURL("image/png"):c.toDataURL("image/jpeg",0.85));
+    };
+    img.onerror=()=>uiAlert("This file could not be read as an image.");
+    img.src=u;
+  };
+  i.click();
+}
+function setLogo(el,companyId,fallback){
+  el.textContent=fallback;
+  if(!companyId)return;
+  const im=new Image();
+  im.onload=()=>{el.textContent="";el.classList.add("hasimg");el.style.backgroundImage=`url(/api/images/company/${companyId}?v=${IMG_V})`};
+  im.src=`/api/images/company/${companyId}?v=${IMG_V}`;
+}
+let CM_LOGO=null;
+function chooseNewLogo(){pickImage(320,d=>{CM_LOGO=d;$("cmLogoPrev").src=d;$("cmLogoPrev").style.display="block"})}
+function openCompanyModal(){CM_LOGO=null;$("cmLogoPrev").style.display="none";["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
 async function submitCompany(){
-  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
+  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,logo:CM_LOGO,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
   try{await api("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("compModal").classList.remove("show");alert("Company onboarded successfully. Share the HR Admin credentials with the company so they can sign in and get started.");loadPage("companies");loadCompaniesCache();}
   catch(e){$("compErr").textContent=e.message}
 }
@@ -764,8 +802,12 @@ function openEditCompany(id){
   EDIT_CO=c;
   $("ecName").value=c.name||"";$("ecIndustry").value=c.industry||"";$("ecPhone").value=c.contact_phone||"";$("ecAddress").value=c.address||"";$("ecEmail").value=c.contact_email||"";
   $("ecSmtpUser").value=c.smtp_user||"";$("ecSmtpPass").value="";$("ecErr").textContent="";
+  const lp=$("ecLogoPrev");lp.style.display="none";lp.onload=()=>lp.style.display="block";lp.src=`/api/images/company/${c.id}?v=${Date.now()}`;
   $("editCompModal").classList.add("show");
 }
+function changeCompanyLogo(){pickImage(320,async d=>{try{await api(`/api/images/company/${EDIT_CO.id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:d})});IMG_V=Date.now();$("ecLogoPrev").src=d;$("ecLogoPrev").style.display="block";refreshBrand()}catch(e){uiAlert(e.message)}})}
+async function removeCompanyLogo(){try{await api(`/api/images/company/${EDIT_CO.id}`,{method:"DELETE"});IMG_V=Date.now();$("ecLogoPrev").style.display="none";refreshBrand()}catch(e){uiAlert(e.message)}}
+function refreshBrand(){if(COMPANY){const el=$("hdrLogo");el.style.backgroundImage="";el.classList.remove("hasimg");setLogo(el,COMPANY.id,(COMPANY.code||COMPANY.name||"HR").replace(/[^A-Za-z0-9]/g,"").slice(0,3).toUpperCase())}}
 async function saveEditCompany(){
   const h={"Content-Type":"application/json"};
   try{
@@ -801,7 +843,7 @@ async function applyBranding(){
     const {company}=await api("/api/branding");
     if(!company)return;
     const ini=(company.code||company.name||"HR").replace(/[^A-Za-z0-9]/g,"").slice(0,3).toUpperCase();
-    $("loginLogo").textContent=ini;$("loginCo").textContent=company.name;$("loginSub").textContent="HR Portal";
+    setLogo($("loginLogo"),company.id,ini);$("loginCo").textContent=company.name;$("loginSub").textContent="HR Portal";
     $("loginH1").textContent=`Welcome to the ${company.name} HR portal.`;
     $("loginTag").textContent="Sign in to view your attendance, leave, payslips, letters and more.";
     $("loginFeat").style.display="none";
@@ -813,6 +855,8 @@ async function applyBranding(){
 /* ---------- Employees ---------- */
 function showEmpForm(){resetEmpForm();$("empForm").style.display="block"}
 function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","eb","ej","edob","ebi","ebn","eba","eifsc","epf","euan","eesic","epan","ebasic","ehra","eoa"].forEach(id=>$(id).value="");$("est").value="Active";$("epfapp").checked=false;$("eesicapp").checked=false;$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee"}
+function changeEmpPhoto(id,self){pickImage(256,async d=>{try{await api(`/api/images/employee/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:d})});IMG_V=Date.now();await uiAlert("The photo has been updated.");if(self)refreshMe().then(()=>{}).catch(()=>{});else renderEmployees()}catch(e){uiAlert(e.message)}})}
+function empAvatar(e){return `<span class="empav">${esc((e.name||"?").slice(0,1).toUpperCase())}<img src="/api/images/employee/${e.id}?v=${IMG_V}" onerror="this.remove()" alt=""></span>`}
 function editEmployee(id){
   const e=EMP.find(x=>x.id===id);if(!e)return;
   $("ec").value=e.employee_code||"";$("en").value=e.name||"";$("ee").value=e.email||"";$("ep").value=e.phone||"";
@@ -856,8 +900,8 @@ function renderEmployees(){
   const q=$("empSearch").value;
   const rows=filterRows(PAGEDATA.employees||[],["employee_code","name","department","designation","branch"],q);
   $("empCount").textContent=`(${rows.length} of ${(PAGEDATA.employees||[]).length})`;
-  table("empTable",["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),esc(e.name),esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),statusBadge(e.status),
-    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="openEmpTiming(${e.id})">Timing</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button><button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
+  table("empTable",["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),`<div style="display:flex;align-items:center;gap:8px">${empAvatar(e)}${esc(e.name)}</div>`,esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),statusBadge(e.status),
+    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="changeEmpPhoto(${e.id})">Photo</button><button class="sm gray" onclick="openEmpTiming(${e.id})">Timing</button><button class="sm gray" onclick="createLogin(${e.id})">Create Login</button><button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
 }
 
 /* ---------- Attendance ---------- */

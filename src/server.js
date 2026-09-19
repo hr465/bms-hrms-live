@@ -50,6 +50,10 @@ CREATE TABLE IF NOT EXISTS attendance(
  status TEXT DEFAULT 'Present',late_minutes INTEGER DEFAULT 0,overtime_minutes INTEGER DEFAULT 0,source TEXT DEFAULT 'Manual',
  UNIQUE(employee_id,work_date)
 );
+CREATE TABLE IF NOT EXISTS images(
+ kind TEXT NOT NULL,ref_id INTEGER NOT NULL,company_id INTEGER,mime TEXT,data TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(kind,ref_id)
+);
 CREATE TABLE IF NOT EXISTS punches(
  id SERIAL PRIMARY KEY,company_id INTEGER,biometric_id TEXT,punch_time TEXT,punch_type TEXT,device_id INTEGER,raw_payload TEXT,
  UNIQUE(company_id,biometric_id,punch_time)
@@ -241,7 +245,7 @@ async function companyByHost(req){
 }
 app.get("/api/branding",wrap(async(req,res)=>{
   const c=await companyByHost(req);
-  res.json({company:c?{name:c.name,code:c.code,industry:c.industry}:null});
+  res.json({company:c?{id:c.id,name:c.name,code:c.code,industry:c.industry}:null});
 }));
 const LOGIN_FAILS=new Map();
 const LOGIN_MAX=8,LOGIN_WINDOW=15*60*1000;
@@ -278,6 +282,61 @@ app.get("/api/me",auth,wrap(async(req,res)=>{
 
 /* ---------------- Companies (Super Admin / platform) ---------------- */
 // Super Admin: list a company's logins and reset a password (a strong one is generated and shown once).
+/* ---------------- Images: company logo and employee profile photo ---------------- */
+const IMG_RE=/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+\/=]+)$/;
+async function storeImage(kind,refId,companyId,dataUrl){
+  const m=IMG_RE.exec(String(dataUrl||""));
+  if(!m)throw new Error("Please upload a PNG, JPG or WebP image");
+  if(Buffer.byteLength(m[2],"base64")>400*1024)throw new Error("The image is too large (maximum 400 KB)");
+  await db.prepare("INSERT INTO images(kind,ref_id,company_id,mime,data) VALUES(?,?,?,?,?) ON CONFLICT(kind,ref_id) DO UPDATE SET mime=excluded.mime,data=excluded.data,company_id=excluded.company_id,updated_at=CURRENT_TIMESTAMP")
+    .run(kind,refId,companyId||null,m[1],m[2]);
+}
+async function sendImage(res,kind,refId){
+  const r=await db.prepare("SELECT mime,data FROM images WHERE kind=? AND ref_id=?").get(kind,refId);
+  if(!r)return res.status(404).end();
+  res.set({"Content-Type":r.mime,"Cache-Control":"private, max-age=300","X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'"});
+  res.send(Buffer.from(r.data,"base64"));
+}
+app.get("/api/images/company/:id",wrap(async(req,res)=>sendImage(res,"company",Number(req.params.id))));
+app.post("/api/images/company/:id",auth,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const id=Number(req.params.id);
+  if(req.user.role!=="Super Admin"&&req.user.company_id!==id)return res.status(403).json({error:"Permission denied"});
+  if(!await db.prepare("SELECT id FROM companies WHERE id=?").get(id))return res.status(404).json({error:"Company not found"});
+  try{await storeImage("company",id,id,req.body.data)}catch(e){return res.status(400).json({error:e.message})}
+  await audit(req,"UPDATE","COMPANY_LOGO",String(id));res.json({ok:true});
+}));
+app.delete("/api/images/company/:id",auth,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const id=Number(req.params.id);
+  if(req.user.role!=="Super Admin"&&req.user.company_id!==id)return res.status(403).json({error:"Permission denied"});
+  await db.prepare("DELETE FROM images WHERE kind='company' AND ref_id=?").run(id);res.json({ok:true});
+}));
+app.get("/api/images/employee/:id",auth,wrap(async(req,res)=>{
+  const e=await db.prepare("SELECT id,company_id FROM employees WHERE id=?").get(Number(req.params.id));
+  const cid=req.user.company_id;
+  if(!e||(req.user.role!=="Super Admin"&&e.company_id!==cid))return res.status(404).end();
+  return sendImage(res,"employee",e.id);
+}));
+async function canEditPhoto(req,empId){
+  const e=await db.prepare("SELECT id,company_id FROM employees WHERE id=?").get(empId);
+  if(!e)return null;
+  const hr=["Super Admin","HR Admin"].includes(req.user.role)&&e.company_id===(req.user.company_id||e.company_id);
+  const self=req.user.employee_id===e.id;
+  return hr||self?e:false;
+}
+app.post("/api/images/employee/:id",auth,wrap(async(req,res)=>{
+  const e=await canEditPhoto(req,Number(req.params.id));
+  if(e===null)return res.status(404).json({error:"Employee not found"});
+  if(!e)return res.status(403).json({error:"Permission denied"});
+  try{await storeImage("employee",e.id,e.company_id,req.body.data)}catch(err){return res.status(400).json({error:err.message})}
+  res.json({ok:true});
+}));
+app.delete("/api/images/employee/:id",auth,wrap(async(req,res)=>{
+  const e=await canEditPhoto(req,Number(req.params.id));
+  if(e===null)return res.status(404).json({error:"Employee not found"});
+  if(!e)return res.status(403).json({error:"Permission denied"});
+  await db.prepare("DELETE FROM images WHERE kind='employee' AND ref_id=?").run(e.id);res.json({ok:true});
+}));
+
 app.get("/api/companies/:id/users",auth,roles("Super Admin"),wrap(async(req,res)=>{
   res.json(await db.prepare("SELECT u.id,u.username,u.role,u.active,e.name AS employee_name FROM users u LEFT JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? ORDER BY u.id").all(req.params.id));
 }));
@@ -307,6 +366,7 @@ app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
       .run(x.name,x.code.toUpperCase(),x.industry||"",x.address||"",x.contact_email||"",x.contact_phone||"","Active",x.smtp_user||null,x.smtp_pass||null);
     const companyId=c.lastInsertRowid;
     await seedCompanyDefaults(companyId);
+    if(x.logo){try{await storeImage("company",companyId,companyId,x.logo)}catch(e){console.warn("logo skipped:",e.message)}}
     const s=crypto.randomBytes(16).toString("hex");
     await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email) VALUES(?,?,?,?,?)").run(companyId,x.admin_username,hash(x.admin_password,s),"HR Admin",x.contact_email||null);
     await audit(req,"ONBOARD","COMPANY",x.name);
