@@ -344,7 +344,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <select id="bmode" onchange="onBioModeChange()"><option value="adms">ADMS push (recommended)</option><option value="lan">LAN pull (sync agent / Sync Now)</option></select>
 <input id="bn" placeholder="Device name (e.g. Udaipur Main Gate)"><input id="bm" placeholder="Model (e.g. X2008)">
 <input id="bsn" placeholder="Serial number (required for ADMS)"><input id="bb" placeholder="Branch"><span></span>
-<input id="bi" placeholder="Device IP (LAN pull only)"><input id="bp" value="4370" placeholder="Port (LAN pull only)"></div>
+<input id="bi" placeholder="Device / server IP address (optional, can be changed later)"><input id="bp" value="4370" placeholder="Port (optional, can be changed later)"></div>
 <input type="hidden" id="editDeviceId"><div class="actions" style="margin-top:8px"><button onclick="saveDevice()" id="bioSaveBtn">Add Device</button><button class="gray" onclick="resetDeviceForm()">Clear</button></div></div>
 <div id="bioTable" class="tblwrap"></div>
 <div class="modalbg" id="admsModal"><div class="modal" style="max-width:560px"><h3>ADMS setup on the device</h3>
@@ -1312,7 +1312,7 @@ async function loadUnregistered(){
   }catch(e){box.style.display="none"}
 }
 function useSerial(sn){$("bmode").value="adms";onBioModeChange();$("bsn").value=sn;window.scrollTo({top:0,behavior:"smooth"})}
-function onBioModeChange(){const adms=$("bmode").value==="adms";$("bi").style.display=adms?"none":"";$("bp").style.display=adms?"none":""}
+function onBioModeChange(){const adms=$("bmode").value==="adms";$("bsn").placeholder=adms?"Serial number (required for ADMS)":"Serial number (optional)"}
 function showAgentConfig(id){
   const d=BIO_CACHE.find(x=>x.id===id);if(!d)return;
   if(!d.api_key){alert("No API key on this device yet. Rotate the key first.");return}
@@ -1338,7 +1338,7 @@ function editDevice(id){
 }
 async function saveDevice(){
   const mode=$("bmode").value;
-  const body={mode,name:$("bn").value,model:$("bm").value,serial_no:$("bsn").value,branch:$("bb").value,ip:mode==="lan"?$("bi").value:"",port:$("bp").value};
+  const body={mode,name:$("bn").value,model:$("bm").value,serial_no:$("bsn").value,branch:$("bb").value,ip:$("bi").value,port:$("bp").value};
   const editId=$("editDeviceId").value;
   try{
     if(editId){await api("/api/biometric/devices/"+editId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("The device has been updated.");}
