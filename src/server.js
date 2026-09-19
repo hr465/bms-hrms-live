@@ -277,6 +277,20 @@ app.get("/api/me",auth,wrap(async(req,res)=>{
 }));
 
 /* ---------------- Companies (Super Admin / platform) ---------------- */
+// Super Admin: list a company's logins and reset a password (a strong one is generated and shown once).
+app.get("/api/companies/:id/users",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT u.id,u.username,u.role,u.active,e.name AS employee_name FROM users u LEFT JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? ORDER BY u.id").all(req.params.id));
+}));
+app.post("/api/users/:id/reset-password",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  const u=await db.prepare("SELECT id,username,role,company_id FROM users WHERE id=?").get(req.params.id);
+  if(!u||u.role==="Super Admin"||!u.company_id)return res.status(404).json({error:"User not found"});
+  const A="ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  let pw="";for(const b of crypto.randomBytes(10))pw+=A[b%A.length];pw+="@7";
+  await db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(hash(pw,crypto.randomBytes(16).toString("hex")),u.id);
+  await db.prepare("DELETE FROM sessions WHERE user_id=?").run(u.id);
+  await audit(req,"RESET_PASSWORD","USER",u.username);
+  res.json({username:u.username,password:pw});
+}));
 app.get("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
   res.json(await db.prepare(`SELECT c.id,c.name,c.code,c.industry,c.address,c.contact_email,c.contact_phone,c.status,c.created_at,c.custom_domain,c.smtp_user,
     (SELECT COUNT(*) FROM employees e WHERE e.company_id=c.id AND e.status='Active') employee_count
