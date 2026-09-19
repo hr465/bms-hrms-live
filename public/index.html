@@ -374,6 +374,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <button type="button" class="sm gray" onclick="useMyLocationAsOffice()">Use my current location as the office</button>
 <p class="small" style="margin-top:6px">With an office location set, every clock in is marked Office or Remote. Leave it blank to only record where the employee was.</p></div>
 <label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtNLow"> Email HR when an employee does not complete the minimum hours</label><label style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="wtNLate"> Email HR about late arrivals</label><p class="small" style="margin-bottom:10px">A summary is emailed to HR and directors every working day, 30 minutes after the close time.</p><div class="actions"><button onclick="saveWorkTiming()">Save working hours</button><button class="gray" onclick="sendDigestNow()">Send today's summary now</button></div></div>
+<div class="panel"><h3>Email log</h3><p class="small" style="margin-bottom:10px">Every email the portal sends for this company is listed here, with the reason if it failed. Use the test to confirm your sender works.</p><div class="actions" style="margin-bottom:10px"><input id="etTo" placeholder="Send a test to (email)" style="max-width:280px"><button onclick="sendEmailTest()">Send test email</button><button class="gray" onclick="loadEmailLog()">Refresh</button></div><div id="emailLogTable" class="tblwrap"></div></div>
 <div class="panel"><h3>Email Settings</h3><p class="small" id="emailSettingsStatus">Loading...</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Sender Gmail</label><input id="esUser" placeholder="companyhr@gmail.com"></div><div class="field"><label>App Password</label><input id="esPass" type="password" placeholder="16-char app password (leave blank to keep current)"></div></div><button onclick="saveEmailSettings()">Save</button><p class="small" style="margin-top:10px">Used to send announcements, payslips and login emails to this company's employees. Leave both blank to use the platform default sender.</p></div>
 <div class="panel"><h3>Policy Agreement</h3><p class="small" style="margin-bottom:10px">This text is used whenever you generate a new onboarding agreement for an employee (Agreements page). You can use placeholders such as {{employee_name}}, {{employee_code}}, {{designation}}, {{department}}, {{branch}}, {{reporting_manager}}, {{joining_date}}, {{company_name}}, {{company_address}}, {{issue_date}}, {{basic_monthly}}, {{hra_monthly}}, {{other_allowances_monthly}}, {{monthly_ctc}} and {{annual_ctc}}; they are filled in for each employee. Editing it only affects future agreements, not ones already in progress.</p><textarea id="policyText" style="min-height:220px"></textarea><div class="actions" style="margin-top:10px"><button onclick="savePolicyText()">Save</button></div></div>
 </section>
@@ -758,7 +759,7 @@ async function loadPage(id){
   if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();}
   if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);loadUnregistered();if(!$("editDeviceId").value)onBioModeChange();}
   if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
-  if(id==="settings"){loadLetterhead();loadWorkTiming();loadCompanyProfile();loadEmailSettings();loadPolicyText();}
+  if(id==="settings"){loadEmailLog();loadLetterhead();loadWorkTiming();loadCompanyProfile();loadEmailSettings();loadPolicyText();}
   if(id==="agreements"){await loadAgreements();}
   if(id==="calendar"){await loadCalendar();}
   if(id==="team"){await loadTeam();}
@@ -1495,6 +1496,18 @@ function renderAudit(){
   const q=$("auditSearch").value;
   const rows=filterRows(PAGEDATA.audit||[],["username","action","module","details"],q);
   table("auditTable",["User","Action","Module","Details","Time"],rows.map(a=>[esc(a.username||"-"),a.action,a.module,esc(a.details),a.created_at]));
+}
+
+/* ---------- Email log ---------- */
+async function loadEmailLog(){
+  try{
+    const rows=await api("/api/email-log");
+    table("emailLogTable",["Time","To","Subject","Status","Details"],rows.map(r=>[String(r.created_at||"").slice(0,16).replace("T"," "),esc(r.to_addr),esc(r.subject),`<span class="badge ${r.status==="sent"?"ok":r.status==="failed"?"bad":"warn"}">${esc(r.status)}</span>`,esc(r.error||"")]));
+  }catch(e){}
+}
+async function sendEmailTest(){
+  try{const r=await api("/api/email-test",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:$("etTo").value})});
+    await uiAlert(r.ok?`A test email was sent to ${r.to}. Please check the inbox and the spam folder.`:`The test email failed: ${r.error}`);loadEmailLog()}catch(e){uiAlert(e.message)}
 }
 
 /* ---------- Letterhead ---------- */

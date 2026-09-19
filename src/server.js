@@ -3,7 +3,7 @@ const path=require("path");
 const crypto=require("crypto");
 const db=require("./db");
 const ZKLib=require("node-zklib");
-const {sendMail,layout}=require("./mail");
+const {sendMail,sendMailEx,layout}=require("./mail");
 const ExcelJS=require("exceljs");
 
 const app=express();
@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS attendance(
 CREATE TABLE IF NOT EXISTS images(
  kind TEXT NOT NULL,ref_id INTEGER NOT NULL,company_id INTEGER,mime TEXT,data TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
  PRIMARY KEY(kind,ref_id)
+);
+CREATE TABLE IF NOT EXISTS email_log(
+ id SERIAL PRIMARY KEY,company_id INTEGER,to_addr TEXT,subject TEXT,status TEXT,error TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS punches(
  id SERIAL PRIMARY KEY,company_id INTEGER,biometric_id TEXT,punch_time TEXT,punch_type TEXT,device_id INTEGER,raw_payload TEXT,
@@ -235,7 +238,7 @@ async function audit(req,action,module,details=""){await db.prepare("INSERT INTO
 async function companySender(companyId){
   if(!companyId)return null;
   const c=await db.prepare("SELECT name,smtp_user,smtp_pass FROM companies WHERE id=?").get(companyId);
-  return c?{name:c.name,smtp_user:c.smtp_user,smtp_pass:c.smtp_pass}:null;
+  return c?{name:c.name,smtp_user:c.smtp_user,smtp_pass:c.smtp_pass,company_id:companyId}:null;
 }
 function wrap(fn){return (req,res)=>fn(req,res).catch(e=>{console.error(e);res.status(500).json({error:e.message||"Server error"})})}
 
@@ -710,7 +713,7 @@ app.post("/api/agreements/:id/sign",auth,requireCompany,wrap(async(req,res)=>{
        ${sigBlock("HR",updated.hr_signed_name,updated.hr_signature,updated.hr_signed_at)}
        ${sigBlock("Director",updated.director_signed_name,updated.director_signature,updated.director_signed_at)}
        <p style="color:#166534;font-weight:700">Fully executed on ${new Date(updated.completed_at).toLocaleString("en-IN")}</p>`);
-    const sender={smtp_user:company?.smtp_user,smtp_pass:company?.smtp_pass,name:company?.name};
+    const sender={smtp_user:company?.smtp_user,smtp_pass:company?.smtp_pass,name:company?.name,company_id:req.user.company_id};
     let att;try{att=[{filename:`Agreement-${emp?.employee_code||updated.id}.pdf`,content:await buildAgreementPdf(req.user.company_id,updated),contentType:"application/pdf"}]}catch(e){console.error("agreement pdf",e.message)}
     if(emp?.email)sendMail(emp.email,`Signed: ${updated.title}`,html,sender,att).catch(()=>{});
     if(company?.contact_email)sendMail(company.contact_email,`Signed: ${updated.title}`,html,sender,att).catch(()=>{});
@@ -1112,7 +1115,7 @@ async function sendDailyDigest(companyId,date,force){
   const html=layout(`Attendance summary — ${date}`,
     (late.length?`<h3 style="margin:10px 0 0">Late arrivals (${late.length})</h3>`+tbl(["Employee","First in","Late by"],late.map(r=>[esc2(r.employee_code+" - "+r.name),esc2((r.first_in||"").slice(11,16)),r.m.late_minutes+" min"])):"")+
     (low.length?`<h3 style="margin:10px 0 0">Minimum working hours not completed (${low.length})</h3>`+tbl(["Employee","Worked","Required"],low.map(r=>[esc2(r.employee_code+" - "+r.name),esc2(r.note),fmtHM(r.need)])):""));
-  const to=await seniorEmails(companyId),sender={name:co.name,smtp_user:co.smtp_user,smtp_pass:co.smtp_pass};
+  const to=await seniorEmails(companyId),sender={name:co.name,smtp_user:co.smtp_user,smtp_pass:co.smtp_pass,company_id:companyId};
   for(const t of to)await sendMail(t,`Attendance summary ${date} — ${co.name}`,html,sender);
   return {sent:to.length,late:late.length,low:low.length};
 }
@@ -2182,6 +2185,18 @@ app.get("/api/reports/overtime/export",auth,requireCompany,roles("Super Admin","
   const name=`${(co?.code||"company").toLowerCase()}_overtime_${month}${detail?"_daily":""}`;
   if(detail)return sendTable(res,format,name,[{header:"Date",key:"work_date"},{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Department",key:"department"},{header:"Shift End",key:"shift_end"},{header:"Last Out",key:"last_out"},{header:"Overtime",key:"overtime"},{header:"Overtime (minutes)",key:"overtime_minutes"}],d.daily);
   return sendTable(res,format,name,[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Department",key:"department"},{header:"Overtime Days",key:"days"},{header:"Total Overtime",key:"total"},{header:"Total Hours",key:"hours"}],d.summary);
+}));
+
+/* ---------------- Email log and test ---------------- */
+app.get("/api/email-log",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT id,to_addr,subject,status,error,created_at FROM email_log WHERE company_id=? ORDER BY id DESC LIMIT 100").all(req.user.company_id));
+}));
+app.post("/api/email-test",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const co=await db.prepare("SELECT contact_email FROM companies WHERE id=?").get(req.user.company_id);
+  const to=String(req.body.to||co?.contact_email||"").trim();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to))return res.status(400).json({error:"Enter a valid email address to send the test to"});
+  const r=await sendMailEx(to,"Test email from your HR portal",layout("Test email","<p>If you can read this, your company's email sender is working.</p>"),await companySender(req.user.company_id));
+  res.json({ok:r.ok,to,error:r.error||null});
 }));
 
 app.get("/api/audit",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>res.json(await db.prepare(`SELECT a.*,u.username FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE a.company_id=? ORDER BY a.id DESC LIMIT 300`).all(req.user.company_id))));
