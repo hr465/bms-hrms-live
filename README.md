@@ -35,6 +35,16 @@ npm start
 
 The application listens on `PORT` (default 3000). On first start it creates the schema and a platform administrator account; change its password immediately after signing in.
 
+## Biometric: ADMS push (recommended)
+
+Devices that support ADMS (Menu, Comm., Cloud Server Setting) send attendance to the portal by themselves, so no computer is needed at the device's office.
+
+1. In the portal open Biometric, choose "ADMS push", enter the device name and its serial number (Menu, System Info, Device Info) and save. A setup guide with the values to type on the device is shown.
+2. On the device set Server Address to the portal domain, Server Port to 443, Enable Domain Name to ON and HTTPS to ON.
+3. The device registers itself within a minute and shows as Online. Punches are pushed in real time; the first contact backfills up to 45 days.
+
+Devices are identified by serial number, so a device only works after its serial number has been registered under a company. The portal listens on `/iclock/cdata`, `/iclock/getrequest` and `/iclock/devicecmd`. Devices with old firmware may not support HTTPS; use the sync agent below for those.
+
 ## Biometric sync agent (device in a different city than HR)
 
 The portal cannot reach a device that sits on a private office network, so each office runs a small agent that uploads attendance to the portal. HR users in any city then see the data without doing anything.

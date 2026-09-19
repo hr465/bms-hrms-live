@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS password_resets(
  token TEXT PRIMARY KEY,user_id INTEGER NOT NULL,expires_at BIGINT NOT NULL,used INTEGER DEFAULT 0
 );
 `);
-for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT"]){
+for(const col of ["serial_no TEXT","last_error TEXT","api_key TEXT","last_seen TEXT","adms_stamp TEXT"]){
   try{await db.exec(`ALTER TABLE biometric_devices ADD COLUMN ${col}`)}catch(e){}
 }
 for(const col of ["email TEXT"]){
@@ -1280,9 +1280,18 @@ app.post("/api/exits/:id/status",auth,requireCompany,roles("Super Admin","HR Adm
 }));
 
 app.get("/api/biometric/devices",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM biometric_devices WHERE company_id=? ORDER BY id DESC").all(req.user.company_id))));
+async function serialTaken(sn,exceptId){
+  if(!sn)return false;
+  const r=await db.prepare("SELECT id FROM biometric_devices WHERE UPPER(serial_no)=UPPER(?)").get(sn);
+  return !!r&&String(r.id)!==String(exceptId||"");
+}
 app.post("/api/biometric/devices",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;const apiKey=crypto.randomBytes(24).toString("hex");
-  const r=await db.prepare("INSERT INTO biometric_devices(company_id,name,model,serial_no,branch,ip,port,protocol,api_key) VALUES(?,?,?,?,?,?,?,?,?)").run(req.user.company_id,x.name,x.model,x.serial_no||"",x.branch,x.ip,Number(x.port)||4370,x.protocol||"ZKTeco/eSSL (LAN)",apiKey);res.json({id:r.lastInsertRowid,api_key:apiKey});
+  const mode=x.mode==="adms"?"adms":"lan";
+  const serial=String(x.serial_no||"").trim();
+  if(mode==="adms"&&!serial)return res.status(400).json({error:"The device serial number is required for ADMS devices"});
+  if(await serialTaken(serial))return res.status(400).json({error:"This serial number is already registered"});
+  const r=await db.prepare("INSERT INTO biometric_devices(company_id,name,model,serial_no,branch,ip,port,protocol,api_key) VALUES(?,?,?,?,?,?,?,?,?)").run(req.user.company_id,x.name,x.model,serial,x.branch,x.ip||"",Number(x.port)||4370,mode==="adms"?"ADMS (push)":"ZKTeco/eSSL (LAN)",apiKey);res.json({id:r.lastInsertRowid,api_key:apiKey});
 }));
 app.post("/api/biometric/devices/:id/rotate-key",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const apiKey=crypto.randomBytes(24).toString("hex");
@@ -1292,8 +1301,12 @@ app.post("/api/biometric/devices/:id/rotate-key",auth,requireCompany,roles("Supe
 }));
 app.put("/api/biometric/devices/:id",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
-  const r=await db.prepare("UPDATE biometric_devices SET name=?,model=?,serial_no=?,branch=?,ip=?,port=? WHERE id=? AND company_id=?")
-    .run(x.name,x.model,x.serial_no||"",x.branch,x.ip,Number(x.port)||4370,req.params.id,req.user.company_id);
+  const serial=String(x.serial_no||"").trim();
+  if(x.mode==="adms"&&!serial)return res.status(400).json({error:"The device serial number is required for ADMS devices"});
+  if(await serialTaken(serial,req.params.id))return res.status(400).json({error:"This serial number is already registered"});
+  const protocol=x.mode==="adms"?"ADMS (push)":x.mode==="lan"?"ZKTeco/eSSL (LAN)":null;
+  const r=await db.prepare("UPDATE biometric_devices SET name=?,model=?,serial_no=?,branch=?,ip=?,port=?,protocol=COALESCE(?,protocol) WHERE id=? AND company_id=?")
+    .run(x.name,x.model,serial,x.branch,x.ip||"",Number(x.port)||4370,protocol,req.params.id,req.user.company_id);
   if(r.changes===0)return res.status(404).json({error:"Device not found"});
   res.json({ok:true});
 }));
@@ -1316,6 +1329,109 @@ async function ingestPunch(companyId,deviceId,biometricId,punchTimeStr){
   return e.employee_code;
 }
 
+// Bulk ingestion: stores raw punches and rebuilds first-in / last-out per employee per day
+// in a handful of queries, so thousands of punches (backfill) process in seconds.
+async function ingestBatch(companyId,deviceId,records){
+  const seen=new Set(),rows=[];
+  for(const r of records||[]){
+    const b=String(r.biometric_id||"").trim(),t=String(r.punch_time||"").trim().replace(" ","T");
+    if(!b||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(t))continue;
+    const k=b+"|"+t;if(seen.has(k))continue;seen.add(k);rows.push({b,t});
+  }
+  if(!rows.length)return {received:0,matched:0,unmatched:0,newPunches:0};
+  let newPunches=0;
+  for(let i=0;i<rows.length;i+=1000){
+    const c=rows.slice(i,i+1000);
+    const r=await db.prepare("INSERT INTO punches(company_id,biometric_id,punch_time,punch_type,device_id,raw_payload) SELECT ?::int,x.b,x.t,'AUTO',?::int,'{}' FROM unnest(?::text[],?::text[]) AS x(b,t) ON CONFLICT DO NOTHING")
+      .run(companyId,deviceId||null,c.map(x=>x.b),c.map(x=>x.t));
+    newPunches+=r.changes||0;
+  }
+  const bids=[...new Set(rows.map(r=>r.b))];
+  const emps=await db.prepare("SELECT id,biometric_id FROM employees WHERE company_id=? AND biometric_id=ANY(?::text[])").all(companyId,bids);
+  const empMap=new Map(emps.map(e=>[e.biometric_id,e.id]));
+  const groups=new Map();let matched=0,unmatched=0;
+  for(const r of rows){
+    const eid=empMap.get(r.b);
+    if(!eid){unmatched++;continue}
+    matched++;
+    const d=r.t.slice(0,10),k=eid+"|"+d,g=groups.get(k)||{emp:eid,d,min:r.t,max:r.t};
+    if(r.t<g.min)g.min=r.t;if(r.t>g.max)g.max=r.t;groups.set(k,g);
+  }
+  if(groups.size){
+    const gl=[...groups.values()];
+    const ex=await db.prepare("SELECT employee_id,work_date,first_in,last_out FROM attendance WHERE employee_id=ANY(?::int[]) AND work_date=ANY(?::text[])")
+      .all([...new Set(gl.map(g=>g.emp))],[...new Set(gl.map(g=>g.d))]);
+    const exMap=new Map(ex.map(a=>[a.employee_id+"|"+a.work_date,a]));
+    const up=gl.map(g=>{
+      const a=exMap.get(g.emp+"|"+g.d);let first=g.min,last=g.max;
+      if(a){if(a.first_in&&a.first_in<first)first=a.first_in;if(a.last_out&&a.last_out>last)last=a.last_out}
+      return {e:g.emp,d:g.d,f:first,l:last===first?null:last};
+    });
+    for(let i=0;i<up.length;i+=500){
+      const c=up.slice(i,i+500);
+      await db.prepare("INSERT INTO attendance(company_id,employee_id,work_date,first_in,last_out,status,source) SELECT ?::int,x.e,x.d,x.f,x.l,'Present','eSSL' FROM unnest(?::int[],?::text[],?::text[],?::text[]) AS x(e,d,f,l) ON CONFLICT(employee_id,work_date) DO UPDATE SET first_in=excluded.first_in,last_out=excluded.last_out,source='eSSL'")
+        .run(companyId,c.map(x=>x.e),c.map(x=>x.d),c.map(x=>x.f),c.map(x=>x.l));
+    }
+  }
+  return {received:rows.length,matched,unmatched,newPunches};
+}
+
+/* ---------------- ADMS / iClock push receiver (device pushes attendance to the portal) ---------------- */
+app.use("/iclock",express.text({type:()=>true,limit:"10mb"}));
+const ADMS_SEEN=new Map(),ADMS_UNKNOWN=new Map();
+const ADMS_MAX_AGE_DAYS=45;
+async function admsDevice(req,res){
+  const sn=String(req.query.SN||req.query.sn||"").trim();
+  if(!sn){res.status(400).type("text/plain").send("ERROR: SN required");return null}
+  const d=await db.prepare("SELECT * FROM biometric_devices WHERE UPPER(serial_no)=UPPER(?)").get(sn);
+  if(!d){
+    ADMS_UNKNOWN.set(sn,{serial_no:sn,ip:req.ip,last_contact:new Date().toISOString(),model:String(req.query.DeviceType||req.query.PushVersion||"")});
+    res.status(403).type("text/plain").send("ERROR: device not registered");return null;
+  }
+  const now=Date.now();
+  if(!ADMS_SEEN.has(d.id)||now-ADMS_SEEN.get(d.id)>60000){
+    ADMS_SEEN.set(d.id,now);
+    await db.prepare("UPDATE biometric_devices SET last_seen=?,status='Connected' WHERE id=?").run(new Date(now).toISOString(),d.id);
+  }
+  return d;
+}
+function parseAttLog(body){
+  const out=[];
+  for(const line of String(body||"").split(/\r?\n/)){
+    const m=line.match(/^\s*(\S+)\s+(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+    if(m)out.push({biometric_id:m[1],punch_time:`${m[2]}T${m[3]}`});
+  }
+  return out;
+}
+app.get(["/iclock/cdata","/iclock/cdata.aspx"],wrap(async(req,res)=>{
+  const d=await admsDevice(req,res);if(!d)return;
+  res.type("text/plain").send([
+    `GET OPTION FROM: ${req.query.SN}`,`ATTLOGStamp=${d.adms_stamp||"None"}`,"OPERLOGStamp=9999","ATTPHOTOStamp=None",
+    "ErrorDelay=30","Delay=10","TransTimes=00:00;14:05","TransInterval=1","TransFlag=TransData AttLog","Realtime=1","Encrypt=None"
+  ].join("\n")+"\n");
+}));
+app.post(["/iclock/cdata","/iclock/cdata.aspx"],wrap(async(req,res)=>{
+  const d=await admsDevice(req,res);if(!d)return;
+  if(String(req.query.table||"").toUpperCase()==="ATTLOG"){
+    const parsed=parseAttLog(req.body);
+    const cut=new Date(Date.now()-ADMS_MAX_AGE_DAYS*86400000).toISOString().slice(0,19);
+    const r=await ingestBatch(d.company_id,d.id,parsed.filter(p=>p.punch_time>=cut));
+    const now=new Date().toISOString();
+    await db.prepare("UPDATE biometric_devices SET last_sync=?,last_seen=?,last_error=NULL,adms_stamp=COALESCE(?,adms_stamp) WHERE id=?").run(now,now,req.query.Stamp?String(req.query.Stamp):null,d.id);
+    if(parsed.length>20)await db.prepare("INSERT INTO audit_logs(company_id,user_id,action,module,details) VALUES(?,?,?,?,?)")
+      .run(d.company_id,null,"SYNC","BIOMETRIC",`${d.name} (ADMS push): ${parsed.length} logs received, ${r.matched} matched, ${r.unmatched} unmatched biometric IDs`);
+  }
+  res.type("text/plain").send("OK");
+}));
+app.all(["/iclock/getrequest","/iclock/getrequest.aspx","/iclock/devicecmd","/iclock/devicecmd.aspx","/iclock/ping"],wrap(async(req,res)=>{
+  const d=await admsDevice(req,res);if(!d)return;
+  res.type("text/plain").send("OK");
+}));
+app.get("/api/biometric/unregistered",auth,roles("Super Admin"),(req,res)=>{
+  const dayAgo=Date.now()-86400000;
+  res.json([...ADMS_UNKNOWN.values()].filter(x=>new Date(x.last_contact).getTime()>dayAgo).sort((a,b)=>b.last_contact.localeCompare(a.last_contact)));
+});
+
 app.post("/api/biometric/punch",auth,requireCompany,wrap(async(req,res)=>{
   const x=req.body;if(!x.biometric_id||!x.punch_time)return res.status(400).json({error:"biometric_id and punch_time required"});
   const code=await ingestPunch(req.user.company_id,x.device_id||null,x.biometric_id,x.punch_time);
@@ -1325,6 +1441,7 @@ app.post("/api/biometric/punch",auth,requireCompany,wrap(async(req,res)=>{
 app.post("/api/biometric/devices/:id/sync",auth,requireCompany,roles("Super Admin","HR Admin"),async(req,res)=>{
   const device=await db.prepare("SELECT * FROM biometric_devices WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
   if(!device)return res.status(404).json({error:"Device not found"});
+  if(device.protocol==="ADMS (push)")return res.status(400).json({error:"This device pushes attendance to the portal automatically (ADMS). Manual sync is not needed."});
   if(!device.ip)return res.status(400).json({error:"Device IP address is not configured"});
   let zk;
   try{
@@ -1335,14 +1452,7 @@ app.post("/api/biometric/devices/:id/sync",auth,requireCompany,roles("Super Admi
     const days=Math.max(1,Number(req.body?.days)||4);
     const cutoff=new Date();cutoff.setHours(0,0,0,0);cutoff.setDate(cutoff.getDate()-(days-1));
     const logs=allLogs.filter(l=>l.recordTime instanceof Date && l.recordTime>=cutoff);
-    let matched=0,unmatched=0;
-    for(const log of logs){
-      const biometricId=String(log.deviceUserId||"").trim();
-      const t=log.recordTime instanceof Date?localISO(log.recordTime):null;
-      if(!biometricId||!t)continue;
-      const code=await ingestPunch(req.user.company_id,device.id,biometricId,t);
-      if(code)matched++;else unmatched++;
-    }
+    const {matched,unmatched}=await ingestBatch(req.user.company_id,device.id,logs.map(l=>({biometric_id:String(l.deviceUserId||"").trim(),punch_time:localISO(l.recordTime)})));
     try{await zk.disconnect()}catch{}
     await db.prepare("UPDATE biometric_devices SET status='Connected',last_sync=?,last_error=NULL WHERE id=?").run(new Date().toISOString(),device.id);
     await audit(req,"SYNC","BIOMETRIC",`${device.name}: ${allLogs.length} logs on device, last ${days} day(s) = ${logs.length} logs, ${matched} matched, ${unmatched} unmatched biometric IDs`);
@@ -1363,15 +1473,8 @@ app.post("/api/biometric/ingest",wrap(async(req,res)=>{
   const device=await db.prepare("SELECT * FROM biometric_devices WHERE id=?").get(device_id);
   if(!device||!device.api_key||device.api_key!==api_key)return res.status(401).json({error:"Invalid device_id or api_key"});
   if(!Array.isArray(records))return res.status(400).json({error:"records array required"});
-  let matched=0,unmatched=0;
-  for(const r of records){
-    const biometricId=String(r.biometric_id||"").trim();
-    const t=r.punch_time;
-    if(!biometricId||!t)continue;
-    const code=await ingestPunch(device.company_id,device.id,biometricId,t);
-    if(code)matched++;else unmatched++;
-  }
-  await db.prepare("UPDATE biometric_devices SET status='Connected',last_sync=?,last_error=NULL WHERE id=?").run(new Date().toISOString(),device.id);
+  const {matched,unmatched}=await ingestBatch(device.company_id,device.id,records);
+  await db.prepare("UPDATE biometric_devices SET status='Connected',last_sync=?,last_seen=?,last_error=NULL WHERE id=?").run(new Date().toISOString(),new Date().toISOString(),device.id);
   if(records.length)await db.prepare("INSERT INTO audit_logs(company_id,user_id,action,module,details) VALUES(?,?,?,?,?)")
     .run(device.company_id,null,"SYNC","BIOMETRIC",`${device.name} (agent push): ${records.length} logs, ${matched} matched, ${unmatched} unmatched biometric IDs`);
   res.json({ok:true,received:records.length,matched,unmatched});

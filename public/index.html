@@ -337,7 +337,22 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 
 <section id="exits" class="page"><div class="pagehead"><h2>Exit / Separation</h2></div><div class="panel"><div class="grid"><div class="field" id="xeiWrap"><label>Employee</label><input id="xei" list="empDL" placeholder="Type name or code"></div><input id="xrd" type="date"><input id="xlwd" type="date"></div><textarea id="xr" placeholder="Reason"></textarea><button onclick="createExit()">Submit Resignation</button></div><div id="exitTable" class="tblwrap"></div></section>
 
-<section id="biometric" class="page"><div class="pagehead"><h2>Biometric Devices (eSSL / ZKTeco)</h2></div><div class="notice"><b>Sync Now</b> works when this HRMS server is on the same office network as the device — set the Device IP below (from the device's Comm/Network menu) and click Sync Now. <b>If this HRMS is later hosted on the internet</b> (away from the device's LAN), use <b>"Sync Agent Config"</b> on the device row instead — it gives you a config file to run alongside the included <code>sync-agent.js</code> on any PC inside that office, which pushes data to this server over the internet automatically. Either way, each employee's <b>Biometric ID</b> (set on the Employees page) must match the ID/PIN enrolled on the device.</div><div class="panel"><h3 id="bioFormTitle">Register a device</h3><div class="grid"><input id="bn" placeholder="Device Name (e.g. Main Gate)"><input id="bm" placeholder="Model (e.g. X2008)"><input id="bsn" placeholder="Serial Number (optional)"><input id="bb" placeholder="Branch"><input id="bi" placeholder="Device IP e.g. 192.168.1.201"><input id="bp" value="4370" placeholder="Port"></div><input type="hidden" id="editDeviceId"><div class="actions"><button onclick="saveDevice()" id="bioSaveBtn">Add Device</button><button class="gray" onclick="resetDeviceForm()">Clear</button></div></div><div id="bioTable" class="tblwrap"></div></section>
+<section id="biometric" class="page"><div class="pagehead"><div><h2>Biometric Devices</h2><div class="desc">Connect eSSL / ZKTeco devices so attendance flows into the portal automatically.</div></div></div>
+<div class="notice"><b>ADMS push (recommended):</b> the device sends attendance to this portal over the internet by itself. It works from any city and needs no computer at the device's office. <b>LAN pull:</b> for devices without ADMS; a small sync agent on a PC at the device's office uploads the data. In both cases each employee's <b>Biometric ID</b> must match the ID enrolled on the device.</div>
+<div id="bioUnreg" class="panel" style="display:none"></div>
+<div class="panel"><h3 id="bioFormTitle">Register a device</h3><div class="grid">
+<select id="bmode" onchange="onBioModeChange()"><option value="adms">ADMS push (recommended)</option><option value="lan">LAN pull (sync agent / Sync Now)</option></select>
+<input id="bn" placeholder="Device name (e.g. Udaipur Main Gate)"><input id="bm" placeholder="Model (e.g. X2008)">
+<input id="bsn" placeholder="Serial number (required for ADMS)"><input id="bb" placeholder="Branch"><span></span>
+<input id="bi" placeholder="Device IP (LAN pull only)"><input id="bp" value="4370" placeholder="Port (LAN pull only)"></div>
+<input type="hidden" id="editDeviceId"><div class="actions" style="margin-top:8px"><button onclick="saveDevice()" id="bioSaveBtn">Add Device</button><button class="gray" onclick="resetDeviceForm()">Clear</button></div></div>
+<div id="bioTable" class="tblwrap"></div>
+<div class="modalbg" id="admsModal"><div class="modal" style="max-width:560px"><h3>ADMS setup on the device</h3>
+<p class="small" style="margin-bottom:10px">On the device open <b>Menu &rarr; Comm. &rarr; Cloud Server Setting</b> and enter the values below. The device registers itself and starts sending attendance within a minute.</p>
+<div id="admsValues"></div>
+<p class="small" style="margin-top:10px">The serial number saved here must match the serial number shown on the device (Menu &rarr; System Info &rarr; Device Info).</p>
+<div class="actions" style="margin-top:12px"><button class="gray" onclick="$('admsModal').classList.remove('show')">Close</button></div></div></div>
+</section>
 
 <section id="audit" class="page"><div class="pagehead"><h2>Audit Log</h2></div><div class="searchbar"><input id="auditSearch" placeholder="Search user / action / module..." oninput="renderAudit()"></div><div id="auditTable" class="tblwrap"></div></section>
 <section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
@@ -670,7 +685,7 @@ async function loadPage(id){
   if(id==="announcements"){PAGEDATA.announcements=await api("/api/announcements");table("annTable",["Title","Body","Audience","Created"],PAGEDATA.announcements.map(a=>[esc(a.title),esc(a.body),a.audience,a.created_at]));}
   if(id==="tickets"){PAGEDATA.tickets=await api("/api/tickets");renderTickets();}
   if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();}
-  if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);}
+  if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);loadUnregistered();if(!$("editDeviceId").value)onBioModeChange();}
   if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
   if(id==="settings"){loadEmailSettings();loadPolicyText();}
   if(id==="agreements"){await loadAgreements();}
@@ -1166,23 +1181,53 @@ function renderExits(){
 /* ---------- Biometric ---------- */
 let BIO_CACHE=[];
 function agentBadge(a){
-  if(!a.last_sync)return `<span class="badge warn">Awaiting first sync</span>`+(a.last_error?`<div class="small" style="margin-top:3px">${esc(a.last_error)}</div>`:"");
-  const mins=(Date.now()-new Date(a.last_sync).getTime())/60000;
-  if(mins<=30)return `<span class="badge ok">Online</span><div class="small" style="margin-top:3px">Last data received ${Math.max(1,Math.round(mins))} min ago</div>`;
-  if(mins<=1440)return `<span class="badge warn">Delayed</span><div class="small" style="margin-top:3px">No data for ${Math.round(mins/60)} hour(s). Check the office PC running the sync agent.</div>`;
-  return `<span class="badge bad">Offline</span><div class="small" style="margin-top:3px">No data for ${Math.round(mins/1440)} day(s). Check the office PC and its internet connection.</div>`;
+  const last=a.last_seen||a.last_sync;
+  const adms=a.protocol==="ADMS (push)";
+  if(!last)return `<span class="badge warn">Awaiting first contact</span>`+(adms?`<div class="small" style="margin-top:3px">Enter the ADMS values on the device (see Setup guide).</div>`:(a.last_error?`<div class="small" style="margin-top:3px">${esc(a.last_error)}</div>`:""));
+  const mins=(Date.now()-new Date(last).getTime())/60000;
+  const who=adms?"Check the device and its internet connection.":"Check the office PC running the sync agent.";
+  if(mins<=30)return `<span class="badge ok">Online</span><div class="small" style="margin-top:3px">Last contact ${Math.max(1,Math.round(mins))} min ago</div>`;
+  if(mins<=1440)return `<span class="badge warn">Delayed</span><div class="small" style="margin-top:3px">No contact for ${Math.round(mins/60)} hour(s). ${who}</div>`;
+  return `<span class="badge bad">Offline</span><div class="small" style="margin-top:3px">No contact for ${Math.round(mins/1440)} day(s). ${who}</div>`;
 }
 function renderBiometric(rows){
   BIO_CACHE=rows;
-  table("bioTable",["Name","Model","Serial No","Branch","IP : Port","Status","Last Sync","Action"],rows.map(a=>[esc(a.name),esc(a.model),esc(a.serial_no||"-"),esc(a.branch),`${esc(a.ip||"-")} : ${a.port}`,
-    agentBadge(a),
-    a.last_sync?new Date(a.last_sync).toLocaleString("en-IN"):"Never",
-    `<div class="actions"><button class="sm outline" onclick="syncDevice(${a.id},this)">Sync Now</button><button class="sm gray" onclick="editDevice(${a.id})">Edit</button><button class="sm gray" onclick="showAgentConfig(${a.id})">Sync Agent Config</button><button class="sm gray" onclick="rotateDeviceKey(${a.id})">Rotate Key</button></div>`]));
+  table("bioTable",["Name","Model","Serial No","Branch","Connection","Status","Last data","Action"],rows.map(a=>{
+    const adms=a.protocol==="ADMS (push)";
+    return [esc(a.name),esc(a.model),esc(a.serial_no||"-"),esc(a.branch),adms?"ADMS push":`LAN ${esc(a.ip||"-")} : ${a.port}`,
+      agentBadge(a),
+      a.last_sync?new Date(a.last_sync).toLocaleString("en-IN"):"Never",
+      adms
+        ?`<div class="actions"><button class="sm outline" onclick="showAdmsSetup(${a.id})">Setup guide</button><button class="sm gray" onclick="editDevice(${a.id})">Edit</button></div>`
+        :`<div class="actions"><button class="sm outline" onclick="syncDevice(${a.id},this)">Sync Now</button><button class="sm gray" onclick="editDevice(${a.id})">Edit</button><button class="sm gray" onclick="showAgentConfig(${a.id})">Sync Agent Config</button><button class="sm gray" onclick="rotateDeviceKey(${a.id})">Rotate Key</button></div>`];
+  }));
 }
+function showAdmsSetup(id){
+  const d=BIO_CACHE.find(x=>x.id===id);if(!d)return;
+  const https=location.protocol==="https:";
+  const row=(k,v)=>`<tr><td style="padding:7px 10px;border:1px solid #e5e7eb;background:#f8fafc;width:46%">${k}</td><td style="padding:7px 10px;border:1px solid #e5e7eb"><b>${v}</b></td></tr>`;
+  $("admsValues").innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:13px">`+
+    row("Server address",esc(location.hostname))+row("Server port",https?"443":(location.port||"80"))+row("Enable domain name","ON")+row("HTTPS",https?"ON":"OFF")+row("Device serial number (registered here)",esc(d.serial_no||"-"))+`</table>`+
+    (https?`<p class="small" style="margin-top:8px">If the device has no HTTPS option, or it stays offline after a few minutes, its firmware may not support secure connections. Tell the administrator so an alternative can be arranged.</p>`:"");
+  $("admsModal").classList.add("show");
+}
+async function loadUnregistered(){
+  const box=$("bioUnreg");
+  if(!ME||ME.role!=="Super Admin"){box.style.display="none";return}
+  try{
+    const u=await api("/api/biometric/unregistered");
+    if(!u.length){box.style.display="none";return}
+    box.style.display="";
+    box.innerHTML=`<h3>Unregistered devices contacting the portal</h3><p class="small" style="margin-bottom:8px">These devices reached the portal but their serial number is not registered. Register the serial number under the correct company to accept their data.</p>`+
+      u.map(x=>`<div class="toolbar"><div><b>${esc(x.serial_no)}</b> <span class="small">from ${esc(x.ip||"-")}, last contact ${new Date(x.last_contact).toLocaleString("en-IN")}</span></div><button class="sm outline" data-sn="${esc(x.serial_no)}" onclick="useSerial(this.dataset.sn)">Use this serial</button></div>`).join("");
+  }catch(e){box.style.display="none"}
+}
+function useSerial(sn){$("bmode").value="adms";onBioModeChange();$("bsn").value=sn;window.scrollTo({top:0,behavior:"smooth"})}
+function onBioModeChange(){const adms=$("bmode").value==="adms";$("bi").style.display=adms?"none":"";$("bp").style.display=adms?"none":""}
 function showAgentConfig(id){
   const d=BIO_CACHE.find(x=>x.id===id);if(!d)return;
   if(!d.api_key){alert("No API key on this device yet. Rotate the key first.");return}
-  const cfg={device_ip:d.ip,device_port:d.port,server_url:location.origin,device_id:d.id,api_key:d.api_key,sync_interval_minutes:5,lookback_days:4};
+  const cfg={device_ip:d.ip,device_port:d.port,server_url:location.origin,device_id:d.id,api_key:d.api_key,sync_interval_minutes:10,lookback_days:30};
   const txt=JSON.stringify(cfg,null,2);
   $("agentCfgText").textContent=txt;
   $("agentCfgModal").classList.add("show");
@@ -1194,19 +1239,26 @@ async function rotateDeviceKey(id){
   if(!await uiConfirm("Rotate this device's API key? The old key, and any sync agent using it, will stop working until it is updated.",{title:"Rotate API key",okText:"Rotate Key",danger:true}))return;
   try{await api(`/api/biometric/devices/${id}/rotate-key`,{method:"POST"});alert("The API key has been rotated. Update any sync agent that uses this device.");loadPage("biometric")}catch(e){alert(e.message)}
 }
-function resetDeviceForm(){["bn","bm","bsn","bb","bi"].forEach(id=>$(id).value="");$("bp").value="4370";$("editDeviceId").value="";$("bioSaveBtn").textContent="Add Device";$("bioFormTitle").textContent="Register a device"}
+function resetDeviceForm(){["bn","bm","bsn","bb","bi"].forEach(id=>$(id).value="");$("bp").value="4370";$("bmode").value="adms";onBioModeChange();$("editDeviceId").value="";$("bioSaveBtn").textContent="Add Device";$("bioFormTitle").textContent="Register a device"}
 function editDevice(id){
   const d=BIO_CACHE.find(x=>x.id===id);if(!d)return;
+  $("bmode").value=d.protocol==="ADMS (push)"?"adms":"lan";onBioModeChange();
   $("bn").value=d.name||"";$("bm").value=d.model||"";$("bsn").value=d.serial_no||"";$("bb").value=d.branch||"";$("bi").value=d.ip||"";$("bp").value=d.port||4370;
   $("editDeviceId").value=d.id;$("bioSaveBtn").textContent="Update Device";$("bioFormTitle").textContent="Edit device";
   window.scrollTo({top:0,behavior:"smooth"});
 }
 async function saveDevice(){
-  const body={name:$("bn").value,model:$("bm").value,serial_no:$("bsn").value,branch:$("bb").value,ip:$("bi").value,port:$("bp").value};
+  const mode=$("bmode").value;
+  const body={mode,name:$("bn").value,model:$("bm").value,serial_no:$("bsn").value,branch:$("bb").value,ip:mode==="lan"?$("bi").value:"",port:$("bp").value};
   const editId=$("editDeviceId").value;
   try{
-    if(editId){await api("/api/biometric/devices/"+editId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Device updated");}
-    else{await api("/api/biometric/devices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Device added. Use \"Sync Now\" if this server is on the same network, or \"Sync Agent Config\" if the device is elsewhere.");}
+    if(editId){await api("/api/biometric/devices/"+editId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("The device has been updated.");}
+    else{
+      const r=await api("/api/biometric/devices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      resetDeviceForm();await loadPage("biometric");
+      if(mode==="adms"){showAdmsSetup(r.id);return}
+      alert("The device has been added. Use Sync Now if this server is on the same network, or Sync Agent Config if the device is at another office.");return;
+    }
     resetDeviceForm();loadPage("biometric");
   }catch(e){alert(e.message)}
 }
