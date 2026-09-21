@@ -148,6 +148,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 .logo.hasimg{background-size:contain;background-repeat:no-repeat;background-position:center;background-color:#fff;color:transparent}
 .empav{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-size:12px;font-weight:700;overflow:hidden;flex:none}
 .empav img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.onbitem{border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -236,14 +237,18 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="field"><label>Bank Name</label><input id="ebn"></div><div class="field"><label>Bank Account</label><input id="eba"></div><div class="field"><label>IFSC</label><input id="eifsc"></div>
 </div>
 <h3 style="margin-top:18px">Statutory Details</h3><div class="grid">
-<div class="field"><label>PF Number</label><input id="epf"></div><div class="field"><label>UAN Number</label><input id="euan"></div><div class="field"><label>ESIC Number</label><input id="eesic"></div>
+<div class="field"><label>UAN Number</label><input id="euan"></div><div class="field"><label>ESIC Number</label><input id="eesic"></div>
 <div class="field"><label>PAN Number</label><input id="epan"></div>
-<div class="field"><label><input type="checkbox" id="epfapp" style="width:auto;display:inline-block;margin-right:6px">PF Applicable</label></div>
-<div class="field"><label><input type="checkbox" id="eesicapp" style="width:auto;display:inline-block;margin-right:6px">ESIC Applicable</label></div>
+<div class="field"><label><input type="checkbox" id="epfapp" onchange="recalcSalary()" style="width:auto;display:inline-block;margin-right:6px">PF Applicable</label></div>
+<div class="field"><label><input type="checkbox" id="eesicapp" onchange="recalcSalary()" style="width:auto;display:inline-block;margin-right:6px">ESIC Applicable</label></div>
 </div>
-<h3 style="margin-top:18px">Salary Structure (CTC)</h3><div class="grid">
-<div class="field"><label>Basic Salary (monthly)</label><input id="ebasic" type="number"></div><div class="field"><label>HRA (monthly)</label><input id="ehra" type="number"></div><div class="field"><label>Other Allowances (monthly)</label><input id="eoa" type="number"></div>
+<h3 style="margin-top:18px">Salary structure (payroll)</h3>
+<p class="small" style="margin-bottom:8px">This salary is used for the offer letter, appointment letter, agreement and every payslip. Enter the monthly gross and use Auto-split, or type each part yourself.</p>
+<div class="grid">
+<div class="field"><label>Monthly gross salary</label><input id="egross" type="number" oninput="recalcSalary(true)"></div><div class="field"><label>&nbsp;</label><button type="button" class="gray" onclick="autoSplitSalary()">Auto-split (Basic 55%, HRA 45%)</button></div><span></span>
+<div class="field"><label>Basic Salary (monthly)</label><input id="ebasic" type="number" oninput="recalcSalary()"></div><div class="field"><label>HRA (monthly)</label><input id="ehra" type="number" oninput="recalcSalary()"></div><div class="field"><label>Other Allowances (monthly)</label><input id="eoa" type="number" oninput="recalcSalary()"></div>
 </div>
+<div id="salPreview" class="notice" style="margin-top:8px">Enter the salary to see the payroll preview.</div>
 <input type="hidden" id="editEmpId"><div class="actions"><button onclick="saveEmployee()" id="empSaveBtn">Save Employee</button><button class="gray" onclick="resetEmpForm()">Clear</button></div></div>
 <div class="toolbar"><div class="searchbar"><input id="empSearch" placeholder="Search name / code / dept..." oninput="renderEmployees()"></div></div>
 <div id="empTable" class="tblwrap"></div></section>
@@ -251,7 +256,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <section id="attendance" class="page"><div class="pagehead"><h2>Attendance</h2></div><div id="clockPanel" class="panel" style="display:none"></div><div id="attForm" class="panel"><div class="grid">
 <div class="field" id="aeidWrap"><label>Employee</label><input id="aeid" list="empDL" placeholder="Type name or code"></div>
 <div class="field"><label>Date</label><input id="adate" type="date"></div><div class="field"><label>First In</label><input id="ain" type="datetime-local"></div><div class="field"><label>Last Out</label><input id="aout" type="datetime-local"></div><div class="field"><label>Status</label><select id="ast"><option>Present</option><option>Absent</option><option>Half Day</option><option>Leave</option></select></div></div><button onclick="saveAttendance()">Save Attendance</button></div>
-<div class="searchbar"><input id="attSearch" placeholder="Search employee / date..." oninput="renderAttendance()"></div>
+<div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="attSearch" placeholder="Employee, code or department" style="max-width:260px" onkeydown="if(event.key==='Enter')renderAttendance()"><label class="small">From</label><input id="attFrom" type="date" style="width:auto"><label class="small">To</label><input id="attTo" type="date" style="width:auto"><button onclick="renderAttendance()">Search</button><button class="gray" onclick="clearAttSearch()">Clear</button></div>
 <div id="attTable" class="tblwrap"></div></section>
 
 <section id="leave" class="page"><div class="pagehead"><h2>Leave Management</h2></div>
@@ -274,7 +279,8 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="searchbar"><input id="candSearch" placeholder="Search name / position..." oninput="renderCandidates()"></div>
 <div id="candTable" class="tblwrap"></div></section>
 
-<section id="onboarding" class="page"><div class="pagehead"><h2>Digital Onboarding</h2></div><div id="onboardTable" class="tblwrap"></div></section>
+<section id="onboarding" class="page"><div class="pagehead"><div><h2>Digital Onboarding</h2><div class="desc">Offer letter, appointment letter, agreement and the documents every new employee must submit.</div></div></div><div id="onboardTable" class="tblwrap"></div>
+<div class="modalbg" id="onbDocModal"><div class="modal" style="max-width:660px"><h3 id="onbTitle">Documents</h3><p class="small" style="margin-bottom:8px">Upload a clear PDF or photo (maximum 8 MB each). Required documents must be uploaded before onboarding is complete.</p><div id="onbBody" style="max-height:58vh;overflow:auto"></div><div class="actions" style="margin-top:12px"><button class="gray" onclick="$('onbDocModal').classList.remove('show');loadPage('onboarding')">Close</button></div></div></div></section>
 
 <section id="agreements" class="page"><div class="pagehead"><div><h2>Onboarding Agreements</h2><div class="desc">Employee signs first, then HR, then the Director — fully executed copies are emailed automatically.</div></div></div>
 <div id="agreementGenPanel" class="panel" style="display:none"><h3>Generate a new agreement</h3><div class="grid"><input id="agEmpPicker" list="empDL" placeholder="Type employee name/code"><button onclick="generateAgreement()">Generate Agreement</button></div><p class="small">Uses the Policy Agreement text configured on the HR Policies page.</p></div>
@@ -285,7 +291,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="field" style="margin-top:14px"><label>Full Name (as signature)</label><input id="signName"></div>
 <label style="font-size:12px;font-weight:600;color:#64748b">Draw your signature below</label>
 <canvas id="sigPad" width="540" height="160" style="border:1px solid #cbd5e1;border-radius:8px;width:100%;touch-action:none;cursor:crosshair;background:#fff"></canvas>
-<div class="actions" style="margin-top:8px"><button class="gray sm" onclick="clearSig()">Clear</button></div>
+<div class="actions" style="margin-top:8px"><button class="gray sm" onclick="clearSig()">Clear</button><button class="gray sm" onclick="$('sigFile').click()">Upload signature image</button><input type="file" id="sigFile" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="loadSigImage(this)"></div><div class="small" style="margin-top:4px">Draw with your mouse or finger, or upload a photo or scan of your signature.</div>
 <div id="signErr" class="err"></div>
 <div class="actions"><button onclick="submitSign()">Sign & Submit</button><button class="gray" onclick="$('signModal').classList.remove('show')">Cancel</button></div>
 </div></div>
@@ -314,11 +320,11 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="eomPanel" class="panel" style="display:none"><div class="toolbar"><div class="field" style="max-width:220px;margin:0"><label>Month</label><input id="eomMonth" type="month" onchange="loadEom()"></div></div><div id="eomBody" style="margin-top:12px"></div></div>
 <h3 style="margin:18px 0 8px">Hall of fame</h3><div id="awardsList" class="tblwrap"></div></section>
 
-<section id="letters" class="page"><div class="pagehead"><div><h2>Letters</h2><div class="desc">Issue appointment letters as a PDF, email them to employees and keep a record of every letter.</div></div></div>
-<div id="letterIssue" class="panel" style="display:none"><h3>Issue appointment letter</h3><div class="grid" style="grid-template-columns:2fr 1fr"><input id="ltEmp" list="empDL" placeholder="Type employee name or code"><button onclick="previewLetter()">Preview and issue</button></div><p class="small" style="margin-top:8px">The letter is generated from your company template, saved to the employee's record and emailed as a PDF. Designation, joining date and salary structure must be filled in on the employee record.</p></div>
-<div id="letterTemplatePanel" class="panel" style="display:none"><h3>Letter template</h3><p class="small" style="margin-bottom:8px">Available placeholders: <span id="ltPlaceholders"></span>. A line starting with "## " becomes a bold heading.</p><textarea id="ltTemplate" style="min-height:300px;font-family:Consolas,monospace;font-size:12.5px"></textarea><div class="actions" id="ltActions" style="margin-top:10px"><button onclick="saveLetterTemplate()">Save template</button><button class="gray" onclick="restoreLetterTemplate()">Restore default</button></div></div>
+<section id="letters" class="page"><div class="pagehead"><div><h2>Letters</h2><div class="desc">Issue offer and appointment letters as a PDF with the employee's salary package, email them, and let employees sign them online.</div></div></div>
+<div id="letterIssue" class="panel" style="display:none"><h3>Issue a letter</h3><div class="grid" style="grid-template-columns:1fr 2fr 1fr"><select id="ltType"><option>Offer Letter</option><option>Appointment Letter</option></select><input id="ltEmp" list="empDL" placeholder="Type employee name or code"><button onclick="previewLetter()">Preview and issue</button></div><p class="small" style="margin-top:6px">Order of onboarding: <b>Offer letter</b> (employee signs) &rarr; <b>Appointment letter</b> (issued automatically, employee signs) &rarr; <b>Agreement</b> (created automatically, signed by employee, HR and Director).</p><p class="small" style="margin-top:8px">The letter is generated from your company template, saved to the employee's record and emailed as a PDF. Designation, joining date and salary structure must be filled in on the employee record.</p></div>
+<div id="letterTemplatePanel" class="panel" style="display:none"><h3>Letter templates</h3><div class="field" style="max-width:260px"><label>Template for</label><select id="ltTplType" onchange="loadLetterTemplate()"><option>Offer Letter</option><option>Appointment Letter</option></select></div><p class="small" style="margin-bottom:8px">Available placeholders: <span id="ltPlaceholders"></span>. A line starting with "## " becomes a bold heading.</p><textarea id="ltTemplate" style="min-height:300px;font-family:Consolas,monospace;font-size:12.5px"></textarea><div class="actions" id="ltActions" style="margin-top:10px"><button onclick="saveLetterTemplate()">Save template</button><button class="gray" onclick="restoreLetterTemplate()">Restore default</button></div></div>
 <h3 style="margin:18px 0 8px">Issued letters</h3><div id="letterList" class="tblwrap"></div>
-<div class="modalbg" id="letterModal"><div class="modal" style="max-width:680px"><h3>Letter preview</h3><div id="letterPreview" style="border:1px solid #e5e7eb;border-radius:8px;padding:16px;max-height:380px;overflow:auto;font-size:13px;line-height:1.55;background:#fff"></div><div id="letterWarn" class="err" style="margin-top:8px"></div><div class="actions" style="margin-top:14px"><button id="letterIssueBtn" onclick="issueLetter()">Issue and email</button><button class="gray" onclick="$('letterModal').classList.remove('show')">Cancel</button></div></div></div></section>
+<div class="modalbg" id="letterModal"><div class="modal" style="max-width:680px"><h3 id="letterModalTitle">Letter preview</h3><div id="letterPreview" style="border:1px solid #e5e7eb;border-radius:8px;padding:16px;max-height:380px;overflow:auto;font-size:13px;line-height:1.55;background:#fff"></div><div id="letterWarn" class="err" style="margin-top:8px"></div><div class="actions" style="margin-top:14px"><button id="letterIssueBtn" onclick="issueLetter()">Issue and email</button><button class="gray" onclick="$('letterModal').classList.remove('show')">Cancel</button></div></div></div></section>
 
 <section id="overtime" class="page"><div class="pagehead"><div><h2>Overtime Report</h2><div class="desc">Time worked after each employee's shift close time. Configure the rule under Settings, Working hours.</div></div><div class="actions"><input id="otMonth" type="month" style="width:auto" onchange="loadOvertime()"><button class="outline" onclick="otDownload('xlsx',false)">Summary (Excel)</button><button class="outline" onclick="otDownload('xlsx',true)">Daily (Excel)</button><button class="outline" onclick="otDownload('csv',false)">CSV</button></div></div><div id="otSummary" class="tblwrap"></div><h3 style="margin:18px 0 8px">Daily detail</h3><div id="otDaily" class="tblwrap"></div></section>
 <section id="mis" class="page"><div class="pagehead"><div><h2>MIS Reports</h2><div class="desc">Management overview across workforce, attendance, payroll, hiring and performance.</div></div><div class="actions"><input id="misMonth" type="month" style="width:auto" onchange="loadMis()"><button class="outline" onclick="window.print()">Print report</button></div></div><div id="misBody"></div></section>
@@ -365,7 +371,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
 <div class="panel"><h3>Company profile</h3><p class="small" style="margin-bottom:10px">These details appear on letters and emails. The company name and web address are managed by the platform administrator.</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Industry</label><input id="cpIndustry"></div><div class="field"><label>Contact phone</label><input id="cpPhone"></div></div><div class="field"><label>Address</label><input id="cpAddress"></div><div class="field"><label>Contact email</label><input id="cpEmail" placeholder="hr@company.com"></div><button onclick="saveCompanyProfile()">Save profile</button></div>
 <div class="panel"><h3>Training manual</h3><p class="small" style="margin-bottom:10px">A step-by-step guide for every role, with this portal address filled in.</p><a class="sm outline" style="padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;display:inline-block" href="/api/training-manual">Download training manual (PDF)</a></div>
-<div class="panel" id="lhPanel"><h3>Letterhead</h3><p class="small" style="margin-bottom:10px">Upload your company letterhead as a full A4 page image (PNG or JPG). Appointment letters and agreements are then printed on it. Set the top and bottom margins so the text stays clear of the header and footer.</p>
+<div class="panel" id="lhPanel"><h3>Letterhead</h3><p class="small" style="margin-bottom:10px">Upload your company letterhead as a full A4 page: a JPG, PNG or WebP image, or a PDF (the first page is used). Appointment letters and agreements are then printed on it. Set the top and bottom margins so the text stays clear of the header and footer.</p>
 <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap"><div id="lhPrevBox" style="width:120px;height:170px;border:1px solid #e5e7eb;border-radius:6px;background:#f8fafc;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:12px;color:#94a3b8"><img id="lhPrev" style="display:none;width:100%;height:100%;object-fit:contain"><span id="lhNone">No letterhead</span></div>
 <div><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Top margin (points)</label><input id="lhTop" type="number" min="20" max="400"></div><div class="field"><label>Bottom margin (points)</label><input id="lhBottom" type="number" min="20" max="400"></div></div>
 <div class="actions"><button class="gray" onclick="chooseLetterhead()">Upload letterhead</button><button onclick="saveLetterhead()">Save margins</button><button class="gray" onclick="removeLetterhead()">Remove</button></div><p class="small" style="margin-top:6px">A4 page is 842 points tall. 72 points = 1 inch.</p></div></div></div>
@@ -551,14 +557,16 @@ function showLogin(){$("app").classList.remove("show");if(RESET_TOKEN){$("resetw
 function openForgot(){$("fpUser").value="";$("forgotMsg").textContent="";$("forgotModal").classList.add("show")}
 async function submitForgot(){
   try{await api("/api/forgot-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("fpUser").value})});
-  $("forgotMsg").textContent="If that account has an email on file, a reset link has been sent.";}
+  $("forgotMsg").textContent="If that account has an email on file, a reset link has been sent.";setTimeout(()=>$("forgotModal").classList.remove("show"),3000);}
   catch(e){$("forgotMsg").textContent=e.message}
 }
 let RESET_TOKEN=null;
 async function submitReset(){
   const np=$("rpNew").value;
   try{await api("/api/reset-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:RESET_TOKEN,new_password:np})});
-    await uiAlert("Your password has been updated successfully. Please sign in with your new password.","ok");location.href=location.pathname;
+    RESET_TOKEN=null;history.replaceState(null,"",location.pathname);
+    $("resetwrap").classList.remove("show");$("loginwrap").classList.add("show");$("lp").value="";$("loginErr").textContent="";
+    uiAlert("Your password has been updated. Please sign in with your new password.","ok");
   }catch(e){$("resetErr").textContent=e.message}
 }
 (function checkResetLink(){
@@ -627,7 +635,7 @@ function navBuild(){
  sections.push({t:"Organization",items:[["employees","Employees",true]]});
  sections.push({t:"Time & Leave",items:[["attendance","Attendance",true],["leave","Leave",true]]});
  sections.push({t:"Payroll & Finance",items:[["payroll","Payroll",["Super Admin","HR Admin","Finance","Manager"].includes(r)],["expenses","Expenses",true]]});
- sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin"].includes(r)],["agreements","Agreements",true],["performance","Performance",true],["increments","Increments",["Super Admin","HR Admin","Director"].includes(r)],["recognition","Recognition",true],["letters","Letters",true]]});
+ sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin","Employee"].includes(r)],["agreements","Agreements",true],["performance","Performance",true],["increments","Increments",["Super Admin","HR Admin","Director"].includes(r)],["recognition","Recognition",true],["letters","Letters",true]]});
  sections.push({t:"Assets & Docs",items:[["assets","Assets",["Super Admin","HR Admin"].includes(r)],["documents","Documents",true]]});
  sections.push({t:"Engagement",items:[["calendar","Calendar",true],["announcements","Announcements",true],["tickets","HR Helpdesk",true],["exits","Exit / Separation",true]]});
  sections.push({t:"Administration",items:[["team","Team",["Super Admin","HR Admin"].includes(r)],["biometric","Biometric / eSSL",["Super Admin","HR Admin"].includes(r)],["audit","Audit Log",["Super Admin","HR Admin"].includes(r)],["settings","HR Policies",["Super Admin","HR Admin"].includes(r)]]});
@@ -733,7 +741,7 @@ async function loadDashboard(){
 }
 
 function table(target,heads,rows){$(target).innerHTML=`<table><thead><tr>${heads.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${heads.length}"><div class="emptystate">No records yet</div></td></tr>`}</tbody></table>`}
-function statusBadge(s){const cls=/approved|active|closed|complete|done|joined|processed|finalized/i.test(s)?"ok":/rejected|inactive|absent/i.test(s)?"bad":"warn";return `<span class="badge ${cls}">${esc(s)}</span>`}
+function statusBadge(s){const cls=/approved|active|closed|complete|done|joined|processed|finalized|signed|paid|sent/i.test(s)?"ok":/rejected|inactive|absent/i.test(s)?"bad":"warn";return `<span class="badge ${cls}">${esc(s)}</span>`}
 function filterRows(rows,fields,q){if(!q)return rows;q=q.toLowerCase();return rows.filter(r=>fields.some(f=>String(r[f]??"").toLowerCase().includes(q)))}
 
 function needsCompany(target){
@@ -754,7 +762,7 @@ async function loadPage(id){
   if(id==="leave"){PAGEDATA.leave=await api("/api/leaves");renderLeaves();loadLeaveBalance();}
   if(id==="payroll"){PAGEDATA.payroll=await api("/api/payroll");renderPayroll();}
   if(id==="recruitment"){PAGEDATA.recruitment=await api("/api/candidates");renderCandidates();}
-  if(id==="onboarding"){let x=await api("/api/onboarding");table("onboardTable",["Employee","Offer","Documents","Verification","Assets","Policy","Complete",isHR()?"Action":""],x.map(a=>[a.employee_code+" - "+a.name,statusBadge(a.offer?"Done":"Pending"),statusBadge(a.documents?"Done":"Pending"),statusBadge(a.verification?"Done":"Pending"),statusBadge(a.assets?"Done":"Pending"),statusBadge(a.policy?"Done":"Pending"),statusBadge(a.completed?"Done":"Pending"),isHR()?onboardActions(a):""]));}
+  if(id==="onboarding"){await loadOnboarding();}
   if(id==="performance"){$("perfForm").style.display=["Super Admin","HR Admin","Manager"].includes(ME.role)?"":"none";PAGEDATA.performance=await api("/api/performance");renderPerformance();}
   if(id==="mis"){await loadMis();}
   if(id==="overtime"){await loadOvertime();}
@@ -916,9 +924,17 @@ async function applyBranding(){
 
 /* ---------- Employees ---------- */
 function showEmpForm(){resetEmpForm();$("empForm").style.display="block"}
-function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","eb","ej","edob","ebi","ebn","eba","eifsc","epf","euan","eesic","epan","ebasic","ehra","eoa"].forEach(id=>$(id).value="");$("est").value="Active";$("epfapp").checked=false;$("eesicapp").checked=false;$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee"}
+function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","eb","ej","edob","ebi","ebn","eba","eifsc","euan","eesic","epan","ebasic","ehra","eoa"].forEach(id=>$(id).value="");$("est").value="Active";$("epfapp").checked=false;$("eesicapp").checked=false;$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee";if($("egross"))$("egross").value="";recalcSalary()}
 function changeEmpPhoto(id,self){pickImage(256,async d=>{try{await api(`/api/images/employee/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:d})});IMG_V=Date.now();await uiAlert("The photo has been updated.");if(self)refreshMe().then(()=>{}).catch(()=>{});else renderEmployees()}catch(e){uiAlert(e.message)}})}
 function empAvatar(e){return `<span class="empav">${esc((e.name||"?").slice(0,1).toUpperCase())}<img src="/api/images/employee/${e.id}?v=${IMG_V}" onerror="this.remove()" alt=""></span>`}
+function recalcSalary(fromGross){
+  const b=+$("ebasic").value||0,h=+$("ehra").value||0,o=+$("eoa").value||0,g=b+h+o;
+  if(!fromGross)$("egross").value=g||"";
+  const pfOn=$("epfapp").checked,esOn=$("eesicapp").checked;
+  const pf=pfOn?b*0.12:0,es=(esOn&&g<=21000)?g*0.0075:0,net=g-pf-es,esEr=(esOn&&g<=21000)?g*0.0325:0,ctc=g+pf+esEr;
+  $("salPreview").innerHTML=g?`<b>Payroll preview (monthly)</b><br>Gross ${inr(g)} &middot; PF (employee) ${inr(pf)} &middot; ESIC (employee) ${inr(es)} &middot; <b>Take-home ${inr(net)}</b><br>Employer PF ${inr(pf)} &middot; Employer ESIC ${inr(esEr)} &middot; CTC ${inr(ctc)} per month, ${inr(ctc*12)} per year`:"Enter the salary to see the payroll preview.";
+}
+function autoSplitSalary(){const g=+$("egross").value||0;if(!g)return uiAlert("Enter the monthly gross salary first.");const b=Math.round(g*0.55);$("ebasic").value=b;$("ehra").value=g-b;$("eoa").value=0;recalcSalary(true)}
 function editEmployee(id){
   const e=EMP.find(x=>x.id===id);if(!e)return;
   $("ec").value=e.employee_code||"";$("en").value=e.name||"";$("ee").value=e.email||"";$("ep").value=e.phone||"";
@@ -926,9 +942,9 @@ function editEmployee(id){
   setEmpInput("em",e.reporting_manager_id);
   $("ej").value=e.joining_date||"";$("edob").value=e.date_of_birth||"";$("ebi").value=e.biometric_id||"";$("est").value=e.status||"Active";
   $("ebn").value=e.bank_name||"";$("eba").value=e.bank_account||"";$("eifsc").value=e.ifsc||"";
-  $("epf").value=e.pf_number||"";$("euan").value=e.uan_number||"";$("eesic").value=e.esic_number||"";$("epan").value=e.pan_number||"";
+  $("euan").value=e.uan_number||"";$("eesic").value=e.esic_number||"";$("epan").value=e.pan_number||"";
   $("epfapp").checked=!!e.pf_applicable;$("eesicapp").checked=!!e.esic_applicable;
-  $("ebasic").value=e.basic_salary||0;$("ehra").value=e.hra||0;$("eoa").value=e.other_allowances||0;
+  $("ebasic").value=e.basic_salary||0;$("ehra").value=e.hra||0;$("eoa").value=e.other_allowances||0;recalcSalary();
   $("editEmpId").value=e.id;$("empSaveBtn").textContent="Update Employee";
   $("empForm").style.display="block";$("empForm").scrollIntoView({behavior:"smooth"});
 }
@@ -936,8 +952,8 @@ async function saveEmployee(){
   const rmId=$("em").value?resolveEmp("em"):null;
   const rmName=rmId?EMP.find(x=>x.id===rmId)?.name:"";
   const body={employee_code:$("ec").value,name:$("en").value,email:$("ee").value,phone:$("ep").value,department:$("ed").value,designation:$("eg").value,manager:rmName,reporting_manager_id:rmId,branch:$("eb").value,joining_date:$("ej").value,date_of_birth:$("edob").value,biometric_id:$("ebi").value,status:$("est").value,bank_name:$("ebn").value,bank_account:$("eba").value,ifsc:$("eifsc").value,
-    pf_number:$("epf").value,uan_number:$("euan").value,esic_number:$("eesic").value,pan_number:$("epan").value,pf_applicable:$("epfapp").checked,esic_applicable:$("eesicapp").checked,
-    basic_salary:$("ebasic").value,hra:$("ehra").value,other_allowances:$("eoa").value};
+    uan_number:$("euan").value,esic_number:$("eesic").value,pan_number:$("epan").value,pf_applicable:$("epfapp").checked,esic_applicable:$("eesicapp").checked,
+    basic_salary:$("ebasic").value,hra:$("ehra").value,other_allowances:$("eoa").value,salary:(+$("ebasic").value||0)+(+$("ehra").value||0)+(+$("eoa").value||0)};
   const editId=$("editEmpId").value;
   try{
     if(editId)await api("/api/employees/"+editId,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -968,7 +984,7 @@ function renderEmployees(){
   const rows=filterRows(PAGEDATA.employees||[],["employee_code","name","department","designation","branch"],q);
   $("empCount").textContent=`(${rows.length} of ${(PAGEDATA.employees||[]).length})`;
   table("empTable",isHR()?["Code","Name","Dept","Designation","Branch","Biometric","Login","Status","Action"]:["Code","Name","Dept","Designation","Branch","Biometric","Status","Action"],rows.map(e=>[esc(e.employee_code),`<div style="display:flex;align-items:center;gap:8px">${empAvatar(e)}${esc(e.name)}</div>`,esc(e.department),esc(e.designation),esc(e.branch),esc(e.biometric_id),...(isHR()?[e.login_username?`<span class="chip">${esc(e.login_username)}</span>`:`<span class="small">No login</span>`]:[]),statusBadge(e.status),
-    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="changeEmpPhoto(${e.id})">Photo</button><button class="sm gray" onclick="openEmpTiming(${e.id})">Timing</button>${e.login_username?`<button class="sm gray" onclick="resetEmpLogin(${e.id})">Reset password</button>`:`<button class="sm gray" onclick="createLogin(${e.id})">Create Login</button>`}<button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button></div>`:""]));
+    isHR()?`<div class="actions"><button class="sm outline" onclick="editEmployee(${e.id})">Edit</button><button class="sm ${e.status==='Active'?'red':'green'}" onclick="toggleEmpStatus(${e.id},'${e.status}')">${e.status==='Active'?'Deactivate':'Activate'}</button><button class="sm gray" onclick="changeEmpPhoto(${e.id})">Photo</button><button class="sm gray" onclick="openEmpTiming(${e.id})">Timing</button>${e.login_username?`<button class="sm gray" onclick="resetEmpLogin(${e.id})">Reset password</button>`:`<button class="sm gray" onclick="createLogin(${e.id})">Create Login</button>`}${empOnboardBtns(e)}</div>`:""]));
 }
 
 /* ---------- Attendance ---------- */
@@ -1002,10 +1018,14 @@ function locCell(a){
   const m=l.mode==="Remote"?`<span class="badge warn">Remote</span>`:l.mode==="Office"?`<span class="badge ok">Office</span>`:`<span class="badge">Recorded</span>`;
   return `<a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener" style="text-decoration:none">${m}</a>`;
 }
+function clearAttSearch(){$("attSearch").value="";$("attFrom").value="";$("attTo").value="";renderAttendance()}
 function renderAttendance(){
   if(needsCompany("attTable"))return;
   const q=$("attSearch").value;
-  const rows=filterRows((PAGEDATA.attendance||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","work_date","department"],q);
+  let rows=filterRows((PAGEDATA.attendance||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","work_date","department"],q);
+  const from=$("attFrom").value,to=$("attTo").value;
+  if(from)rows=rows.filter(a=>a.work_date>=from);
+  if(to)rows=rows.filter(a=>a.work_date<=to);
   const hm=m=>m?Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m":"-";
   table("attTable",["Date","Employee","Dept","First In","Last Out","Location","Late","Worked","Overtime","Status","Source"],rows.map(a=>[a.work_date,esc(a.employee_code+" - "+a.name),esc(a.department),a.first_in||"-",a.last_out||"-",locCell(a),a.late_minutes?a.late_minutes+" min":"-",(a.last_out&&a.worked_minutes<a.min_minutes?`<span class="badge bad">${hm(a.worked_minutes)}</span>`:hm(a.worked_minutes)),hm(a.overtime_minutes),statusBadge(a.status),a.source]));
 }
@@ -1111,7 +1131,40 @@ function renderCandidates(){
 
 /* ---------- Onboarding ---------- */
 function onboardActions(a){
-  return `<div class="actions"><button class="sm outline" onclick="markOnboard(${a.id},${JSON.stringify({offer:a.offer,documents:a.documents,verification:a.verification,assets:a.assets,policy:a.policy,completed:1}).replace(/"/g,'&quot;')})">Mark Complete</button></div>`;
+  return `<button class="sm outline" onclick="markOnboard(${a.id},${JSON.stringify({offer:a.offer,documents:a.documents,verification:a.verification,assets:a.assets,policy:a.policy,completed:1}).replace(/"/g,'&quot;')})">Mark Complete</button>`;
+}
+async function loadOnboarding(){
+  const x=await api("/api/onboarding");
+  const st=(s,ok)=>!s?`<span class="small">Not started</span>`:s===ok?statusBadge("Signed"):`<span class="badge warn">${esc(s==="Issued"?"Awaiting signature":s)}</span>`;
+  table("onboardTable",["Employee","Offer letter","Appointment letter","Agreement","Documents","Verification","Assets","Complete","Action"],x.map(a=>[esc(a.employee_code+" - "+a.name),st(a.offer_status,"Signed"),st(a.appointment_status,"Signed"),st(a.agreement_status,"Completed"),
+    `<span class="badge ${a.docs_done>=a.docs_required?"ok":"warn"}">${a.docs_done}/${a.docs_required}</span>`,statusBadge(a.verification?"Done":"Pending"),statusBadge(a.assets?"Done":"Pending"),statusBadge(a.completed?"Done":"Pending"),
+    `<div class="actions"><button class="sm outline" onclick="openOnbDocs(${a.employee_id})">Documents</button>${isHR()?onboardActions(a):""}</div>`]));
+}
+let ONB_EMP=null,ONB_ITEMS=[];
+async function openOnbDocs(id){
+  ONB_EMP=id;
+  try{
+    const d=await api(`/api/employees/${id}/onboarding-docs`);ONB_ITEMS=d.items;
+    $("onbTitle").textContent=`Documents — ${d.employee.name} (${d.progress.done} of ${d.progress.required} required)`;
+    $("onbBody").innerHTML=d.items.map(it=>`<div class="onbitem"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>${esc(it.label)}</b><span class="badge ${it.files.length?"ok":(it.required?"bad":"warn")}">${it.files.length?"Uploaded":(it.required?"Required":"Optional")}</span></div>
+      ${it.files.map(f=>`<div class="small" style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap"><a href="/api/documents/${f.id}/file" target="_blank" rel="noopener">${esc(f.file_name||f.doc_type)}</a><span>${esc(f.doc_type)}</span>${d.canEdit?`<button class="sm red" onclick="delOnbDoc(${f.id})">Remove</button>`:""}</div>`).join("")}
+      ${d.canEdit?`<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">${it.types.length>1?`<select id="onbT_${it.key}" style="width:auto">${it.types.map(t=>`<option>${esc(t)}</option>`).join("")}</select>`:""}<input type="file" id="onbF_${it.key}" style="width:auto" accept="${it.key==="photo"?"image/*":"image/*,application/pdf"}"><button class="sm" onclick="uploadOnbDoc('${it.key}')">Upload</button></div>`:""}</div>`).join("");
+    $("onbDocModal").classList.add("show");
+  }catch(e){uiAlert(e.message)}
+}
+async function uploadOnbDoc(key){
+  const f=$("onbF_"+key).files[0];if(!f)return uiAlert("Choose a file first.");
+  if(f.size>8*1024*1024)return uiAlert("The file is too large (maximum 8 MB).");
+  const it=ONB_ITEMS.find(x=>x.key===key),type=$("onbT_"+key)?$("onbT_"+key).value:it.types[0];
+  try{
+    const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=()=>rej(new Error("The file could not be read"));r.readAsDataURL(f)});
+    await api("/api/documents",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:ONB_EMP,name:type,doc_type:type,file_name:f.name,file_mime:f.type||"application/octet-stream",file_base64:b64})});
+    openOnbDocs(ONB_EMP);
+  }catch(e){uiAlert(e.message)}
+}
+async function delOnbDoc(id){
+  if(!await uiConfirm("Remove this document?",{danger:true,okText:"Remove"}))return;
+  try{await api("/api/documents/"+id,{method:"DELETE"});openOnbDocs(ONB_EMP)}catch(e){uiAlert(e.message)}
 }
 async function markOnboard(id,payload){try{await api("/api/onboarding/"+id,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});loadPage("onboarding")}catch(e){alert(e.message)}}
 
@@ -1260,58 +1313,71 @@ async function declareEom(empId){
 }
 
 /* ---------- Letters ---------- */
-let LETTER_DEFAULT="",LETTER_EMP=null;
-async function saveBlob(url,fallback){
-  try{
-    const r=await fetch(url);
-    if(r.status===401){showLogin();return}
-    if(!r.ok){const d=await r.json().catch(()=>({}));throw Error(d.error||"Download failed")}
-    const blob=await r.blob();
-    const name=((r.headers.get("Content-Disposition")||"").match(/filename="([^"]+)"/)||[])[1]||fallback;
-    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
-  }catch(e){alert(e.message)}
-}
+let LETTER_DEFAULT="",LETTER_EMP=null,LETTER_TYPE="Offer Letter",LETTER_CACHE=[];
 async function loadLetters(){
   if(needsCompany("letterList"))return;
-  const hr=isHR();
+  const hr=isHR(),isEmp=ME.role==="Employee";
   $("letterIssue").style.display=ME.role==="Super Admin"||ME.role==="HR Admin"?"":"none";
   const seeTpl=["Super Admin","HR Admin","Director"].includes(ME.role);
   $("letterTemplatePanel").style.display=seeTpl?"":"none";
-  if(seeTpl){
-    const t=await api("/api/letter-template");
-    LETTER_DEFAULT=t.defaultTemplate;$("ltTemplate").value=t.template;
-    $("ltPlaceholders").innerHTML=t.placeholders.map(p=>`<code>{{${p}}}</code>`).join(" ");
-    $("ltTemplate").readOnly=!hr;$("ltActions").style.display=hr?"":"none";
-  }
-  const rows=await api("/api/letters");
-  table("letterList",["Reference","Employee","Type","Issued on","Issued by","Emailed","Action"],rows.map(l=>[esc(l.ref_no),esc(l.employee_code+" - "+l.name),esc(l.letter_type),new Date(l.issued_at).toLocaleDateString("en-IN"),esc(l.issued_by||"-"),
+  if(seeTpl)await loadLetterTemplate();
+  const rows=await api("/api/letters");LETTER_CACHE=rows;
+  const stat=l=>l.status==="Signed"?statusBadge("Signed"):`<span class="badge warn">Awaiting signature</span>`;
+  table("letterList",["Reference","Employee","Type","Status","Issued on","Signed on","Emailed","Action"],rows.map(l=>[esc(l.ref_no),esc(l.employee_code+" - "+l.name),esc(l.letter_type),stat(l),new Date(l.issued_at).toLocaleDateString("en-IN"),l.employee_signed_at?new Date(l.employee_signed_at).toLocaleDateString("en-IN"):"-",
     l.emailed_at?statusBadge("Sent"):`<span class="small">Not sent</span>`,
-    `<div class="actions"><button class="sm outline" onclick="saveBlob('/api/letters/${l.id}/pdf','letter.pdf')">Download PDF</button>${hr&&l.email?`<button class="sm gray" onclick="resendLetter(${l.id})">Resend email</button>`:""}</div>`]));
+    `<div class="actions">${isEmp&&l.status!=="Signed"?`<button class="sm" onclick="openSignLetter(${l.id})">Review & Sign</button>`:""}<button class="sm outline" onclick="saveBlob('/api/letters/${l.id}/pdf','letter.pdf')">Download PDF</button>${hr&&l.email?`<button class="sm gray" onclick="resendLetter(${l.id})">Resend email</button>`:""}</div>`]));
+}
+async function loadLetterTemplate(){
+  const type=$("ltTplType").value==="Offer Letter"?"offer":"appointment";
+  const t=await api("/api/letter-template?type="+type);
+  LETTER_DEFAULT=t.defaultTemplate;$("ltTemplate").value=t.template;
+  $("ltPlaceholders").innerHTML=t.placeholders.map(p=>`<code>{{${p}}}</code>`).join(" ");
+  $("ltTemplate").readOnly=!isHR();$("ltActions").style.display=isHR()?"":"none";
 }
 async function saveLetterTemplate(){
-  try{await api("/api/letter-template",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template:$("ltTemplate").value})});alert("The letter template has been saved.")}catch(e){alert(e.message)}
+  const type=$("ltTplType").value==="Offer Letter"?"offer":"appointment";
+  try{await api("/api/letter-template",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type,template:$("ltTemplate").value})});alert("The letter template has been saved.")}catch(e){alert(e.message)}
 }
 async function restoreLetterTemplate(){
   if(!await uiConfirm("Replace the current template with the default template? Unsaved changes will be lost.",{title:"Restore default template",okText:"Restore"}))return;
   $("ltTemplate").value=LETTER_DEFAULT;
 }
-async function previewLetter(){
+function previewLetter(){
   const id=resolveEmp("ltEmp");if(!id)return alert("Please select a valid employee from the list.");
+  LETTER_TYPE=$("ltType").value;openLetterPreview(id);
+}
+function issueOfferFor(id){LETTER_TYPE="Offer Letter";openLetterPreview(id)}
+async function openLetterPreview(id){
   try{
-    const d=await api(`/api/employees/${id}/letters/preview`,{method:"POST"});
+    const d=await api(`/api/employees/${id}/letters/preview`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:LETTER_TYPE})});
     LETTER_EMP=id;$("letterPreview").innerHTML=d.html;
-    $("letterWarn").textContent=d.missing.length?`Please complete the employee's ${d.missing.join(", ")} before issuing this letter.`:(d.hasEmail?"":"This employee has no email address on file. The letter will be saved and can be downloaded, but it will not be emailed.");
-    $("letterIssueBtn").disabled=d.missing.length>0;
+    const warn=[];
+    if(d.missing.length)warn.push(`Please complete the employee's ${d.missing.join(", ")} before issuing this letter.`);
+    if(!d.hasEmail)warn.push("This employee has no email address on file. The letter will be saved and can be downloaded, but it will not be emailed.");
+    (d.notes||[]).forEach(n=>warn.push(n));
+    $("letterWarn").textContent=warn.join(" ");
+    $("letterIssueBtn").disabled=d.missing.length>0;$("letterIssueBtn").textContent=LETTER_TYPE==="Offer Letter"?"Send offer letter":"Issue appointment letter";
+    $("letterModalTitle").textContent=LETTER_TYPE+" preview";
     $("letterModal").classList.add("show");
   }catch(e){alert(e.message)}
 }
 async function issueLetter(){
+  const post=body=>api(`/api/employees/${LETTER_EMP}/letters`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   try{
-    const r=await api(`/api/employees/${LETTER_EMP}/letters`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({send_email:true})});
-    $("letterModal").classList.remove("show");$("ltEmp").value="";
-    alert(r.emailed?`Letter ${r.ref_no} was issued and emailed to the employee.`:`Letter ${r.ref_no} was issued and saved. It was not emailed${r.hasEmail?" (check the company's email settings)":" because the employee has no email address"}.`);
-    loadLetters();
+    let r;
+    try{r=await post({type:LETTER_TYPE,send_email:true})}
+    catch(e){
+      if(LETTER_TYPE==="Appointment Letter"&&/offer letter first/i.test(e.message)){
+        if(!await uiConfirm(e.message+"\n\nIssue the appointment letter anyway, without an offer letter?",{title:"Skip the offer letter?",okText:"Issue anyway"}))return;
+        r=await post({type:LETTER_TYPE,send_email:true,skip_offer:true});
+      }else throw e;
+    }
+    $("letterModal").classList.remove("show");if($("ltEmp"))$("ltEmp").value="";
+    let msg=`${r.ref_no} was issued`+(r.emailed?" and emailed to the employee.":` and saved. It was not emailed${r.hasEmail?" (check the company's email settings)":" because the employee has no email address"}.`);
+    if(r.login)msg+=`\n\nA login was created for the employee.\nUsername: ${r.login.username}\nTemporary password: ${r.login.temp_password}`;
+    else if(LETTER_TYPE==="Offer Letter"&&!r.loginUsername)msg+="\n\nThe employee has no login yet, so they cannot sign. Use Create Login on the Employees page.";
+    await uiAlert(msg,"info");
+    const cur=document.querySelector(".page.active")?.id;if(cur==="employees")loadPage("employees");else loadLetters();
   }catch(e){$("letterWarn").textContent=e.message}
 }
 async function resendLetter(id){
@@ -1564,7 +1630,23 @@ async function loadLetterhead(){
     if(l.has){im.onload=()=>{im.style.display="block";$("lhNone").style.display="none"};im.src="/api/letterhead/image?v="+Date.now()}
   }catch(e){}
 }
-function chooseLetterhead(){pickImage(1754,async d=>{LH_PENDING=d;$("lhPrev").src=d;$("lhPrev").style.display="block";$("lhNone").style.display="none";await saveLetterhead(true)})}
+function imageToJpeg(f,maxDim){return new Promise((res,rej)=>{const img=new Image(),u=URL.createObjectURL(f);img.onload=()=>{const k=Math.min(1,maxDim/Math.max(img.width,img.height)),c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);const x=c.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);res(c.toDataURL("image/jpeg",0.88))};img.onerror=()=>rej(new Error("This file could not be read as an image."));img.src=u})}
+async function pdfToJpeg(f){
+  if(!window.pdfjsLib){
+    await new Promise((res,rej)=>{const sc=document.createElement("script");sc.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";sc.onload=res;sc.onerror=()=>rej(new Error("The PDF reader could not be loaded. Please upload an image instead."));document.head.appendChild(sc)});
+    pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+  const pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise,pg=await pdf.getPage(1),v0=pg.getViewport({scale:1}),vp=pg.getViewport({scale:1240/v0.width});
+  const c=document.createElement("canvas");c.width=vp.width;c.height=vp.height;const x=c.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);
+  await pg.render({canvasContext:x,viewport:vp}).promise;return c.toDataURL("image/jpeg",0.88);
+}
+function chooseLetterhead(){
+  const i=document.createElement("input");i.type="file";i.accept="image/png,image/jpeg,image/webp,application/pdf";
+  i.onchange=async()=>{const f=i.files[0];if(!f)return;
+    try{const d=f.type==="application/pdf"?await pdfToJpeg(f):await imageToJpeg(f,1754);LH_PENDING=d;$("lhPrev").src=d;$("lhPrev").style.display="block";$("lhNone").style.display="none";await saveLetterhead(true)}
+    catch(e){uiAlert(e.message)}};
+  i.click();
+}
 async function saveLetterhead(quiet){
   try{await api("/api/letterhead",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:LH_PENDING,top:$("lhTop").value,bottom:$("lhBottom").value})});LH_PENDING=null;if(!quiet)await uiAlert("The letterhead settings have been saved.");else await uiAlert("The letterhead has been uploaded.")}catch(e){uiAlert(e.message)}
 }
@@ -1684,11 +1766,19 @@ async function generateAgreement(){
   const eid=resolveEmp("agEmpPicker");if(!eid)return alert("Please select a valid employee from the list.");
   try{await api(`/api/employees/${eid}/agreements`,{method:"POST"});alert("Agreement generated");$("agEmpPicker").value="";loadAgreements();}catch(e){alert(e.message)}
 }
+function empOnboardBtns(e){
+  const note=t=>`<span class="small" style="align-self:center">${t}</span>`;
+  let h="";
+  h+=!e.offer_status?`<button class="sm gray" onclick="issueOfferFor(${e.id})">Offer letter</button>`:note("Offer: "+esc(e.offer_status));
+  if(e.agreement_status)h+=note("Agreement: "+esc(e.agreement_status));
+  else if(e.appointment_status==="Signed")h+=`<button class="sm gray" onclick="quickGenerateAgreement(${e.id})">Agreement</button>`;
+  return h;
+}
 async function quickGenerateAgreement(empId){
   if(!await uiConfirm("Generate an onboarding agreement for this employee using the current Policy Agreement text?",{title:"Generate agreement",okText:"Generate"}))return;
   try{await api(`/api/employees/${empId}/agreements`,{method:"POST"});alert("Agreement generated. Go to Agreements page to track signing.");}catch(e){alert(e.message)}
 }
-let CURRENT_SIGN_ID=null,SIG_DRAWING=false,SIG_CTX=null;
+let CURRENT_SIGN_ID=null,SIG_DRAWING=false,SIG_CTX=null,SIGN_KIND="agreement";
 function setupSigPad(){
   const c=$("sigPad");
   const ratio=c.width/c.getBoundingClientRect().width||1;
@@ -1701,12 +1791,31 @@ function setupSigPad(){
   c.ontouchstart=start;c.ontouchmove=move;c.ontouchend=end;
 }
 function clearSig(){SIG_CTX&&SIG_CTX.clearRect(0,0,$("sigPad").width,$("sigPad").height)}
+function loadSigImage(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;
+  const img=new Image(),u=URL.createObjectURL(f);
+  img.onload=()=>{const c=$("sigPad"),x=SIG_CTX||c.getContext("2d");
+    const k=Math.min(c.width/img.width,c.height/img.height,1),w=img.width*k,h=img.height*k;
+    x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(img,(c.width-w)/2,(c.height-h)/2,w,h);
+    URL.revokeObjectURL(u);inp.value="";$("signErr").textContent=""};
+  img.onerror=()=>{$("signErr").textContent="This file could not be read as an image."};
+  img.src=u;
+}
+async function openSignLetter(id){
+  try{
+    const l=await api("/api/letters/"+id);
+    SIGN_KIND="letter";CURRENT_SIGN_ID=id;
+    $("signModalTitle").textContent=l.letter_type+" — "+l.ref_no;$("signContent").textContent=l.content;
+    $("signName").value=ME.full_name||ME.username;$("signErr").textContent="";
+    $("signModal").classList.add("show");setTimeout(()=>{setupSigPad();clearSig()},50);
+  }catch(e){alert(e.message)}
+}
 function openSign(id){
   const a=AGREEMENTS_CACHE.find(x=>x.id===id);if(!a)return;
-  CURRENT_SIGN_ID=id;
+  SIGN_KIND="agreement";CURRENT_SIGN_ID=id;
   $("signModalTitle").textContent=a.title;
   $("signContent").textContent=a.content;
-  $("signName").value=ME.username;
+  $("signName").value=ME.full_name||ME.username;
   $("signErr").textContent="";
   $("signModal").classList.add("show");
   setTimeout(()=>{setupSigPad();clearSig();},50);
@@ -1718,6 +1827,12 @@ async function submitSign(){
   if($("sigPad").toDataURL()===blank.toDataURL())return $("signErr").textContent="Please draw your signature";
   const signature=$("sigPad").toDataURL("image/png");
   try{
+    if(SIGN_KIND==="letter"){
+      const r=await api(`/api/letters/${CURRENT_SIGN_ID}/sign`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({signature,signed_name:name})});
+      $("signModal").classList.remove("show");
+      await uiAlert("Signed successfully. A copy has been emailed to you."+(r.next?`\n\nNext step: your ${r.next} is ready. Please open it and sign.`:"")+(r.note?`\n\n${r.note}`:""),"ok");
+      loadLetters();return;
+    }
     await api(`/api/agreements/${CURRENT_SIGN_ID}/sign`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({signature,signed_name:name})});
     $("signModal").classList.remove("show");
     alert("Signed successfully");
