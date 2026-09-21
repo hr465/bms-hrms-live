@@ -14,7 +14,7 @@ app.use(express.json({limit:"15mb"}));
 app.use((req,res,next)=>{if(req.body===undefined)req.body={};next()});
 // The platform Super Admin manages companies, not their data: inside a company workspace it is read-only.
 // Employees, payroll, attendance and the rest are maintained by that company's own HR Admin.
-const SA_WRITE_OK=[/^\/api\/login$/,/^\/api\/logout$/,/^\/api\/change-password$/,/^\/api\/switch-company$/,/^\/api\/companies(\/|$)/,/^\/api\/users\/\d+\/reset-password$/,/^\/api\/images\/company\/\d+$/,/^\/api\/email-test$/,/^\/api\/forgot-password$/,/^\/api\/reset-password$/];
+const SA_WRITE_OK=[/^\/api\/login$/,/^\/api\/logout$/,/^\/api\/change-password$/,/^\/api\/switch-company$/,/^\/api\/companies(\/|$)/,/^\/api\/users\/\d+\/reset-password$/,/^\/api\/images\/company\/\d+$/,/^\/api\/images\/platform$/,/^\/api\/platform-email$/,/^\/api\/email-test$/,/^\/api\/forgot-password$/,/^\/api\/reset-password$/];
 app.use("/api",async(req,res,next)=>{
   try{
     if(req.method==="GET"||req.method==="HEAD"||req.method==="OPTIONS")return next();
@@ -261,9 +261,15 @@ async function companyByHost(req){
   if(!h)return null;
   return (await db.prepare("SELECT id,name,code,industry FROM companies WHERE LOWER(custom_domain)=?").get(h))||null;
 }
+const platformBrand=async()=>({
+  name:process.env.PLATFORM_NAME||"Bhartiya Management Solutions",
+  product:process.env.PLATFORM_PRODUCT||"Enterprise HRMS",
+  short:process.env.PLATFORM_SHORT||"BMS",
+  has_logo:!!await db.prepare("SELECT 1 x FROM images WHERE kind='platform' AND ref_id=0").get(),
+});
 app.get("/api/branding",wrap(async(req,res)=>{
   const c=await companyByHost(req);
-  res.json({company:c?{id:c.id,name:c.name,code:c.code,industry:c.industry}:null});
+  res.json({company:c?{id:c.id,name:c.name,code:c.code,industry:c.industry}:null,platform:await platformBrand()});
 }));
 const LOGIN_FAILS=new Map();
 const LOGIN_MAX=8,LOGIN_WINDOW=15*60*1000;
@@ -300,6 +306,26 @@ app.get("/api/me",auth,wrap(async(req,res)=>{
 
 /* ---------------- Companies (Super Admin / platform) ---------------- */
 // Super Admin: list a company's logins and reset a password (a strong one is generated and shown once).
+/* ---------------- Platform branding (logo) and Super Admin email ---------------- */
+app.get("/api/images/platform",wrap(async(req,res)=>sendImage(res,"platform",0)));
+app.post("/api/images/platform",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  try{await storeImage("platform",0,null,req.body.data)}catch(e){return res.status(400).json({error:e.message})}
+  await audit(req,"UPDATE","PLATFORM_LOGO","");res.json({ok:true});
+}));
+app.delete("/api/images/platform",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  await db.prepare("DELETE FROM images WHERE kind='platform' AND ref_id=0").run();res.json({ok:true});
+}));
+app.get("/api/platform-email",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  const u=await db.prepare("SELECT email FROM users WHERE id=?").get(req.user.id);
+  res.json({email:u?.email||"",sender:process.env.GMAIL_USER||""});
+}));
+app.post("/api/platform-email",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  const email=String(req.body.email||"").trim();
+  if(email&&!EMAIL_RE.test(email))return res.status(400).json({error:"Enter a valid email address"});
+  await db.prepare("UPDATE users SET email=? WHERE id=?").run(email||null,req.user.id);
+  await audit(req,"UPDATE","PLATFORM_EMAIL","");res.json({ok:true});
+}));
+
 /* ---------------- Images: company logo and employee profile photo ---------------- */
 const IMG_RE=/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+\/=]+)$/;
 async function storeImage(kind,refId,companyId,dataUrl){

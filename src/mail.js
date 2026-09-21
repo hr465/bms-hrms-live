@@ -82,7 +82,7 @@ async function sendMail(to, subject, html, sender, attachments) {
 
 function layout(title, bodyHtml) {
   return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;color:#0f172a">
-  <div style="font-size:18px;font-weight:700;color:#4f46e5;margin-bottom:18px">BMS Enterprise HRMS</div>
+  <div style="font-size:18px;font-weight:700;color:#4f46e5;margin-bottom:18px">${process.env.PLATFORM_EMAIL_HEADER || "BMS Enterprise HRMS"}</div>
   <h2 style="margin:0 0 14px">${title}</h2>
   ${bodyHtml}
   <div style="margin-top:28px;padding-top:14px;border-top:1px solid #e5e7eb;font-size:12px;color:#64748b">This is an automated message from your organization's HRMS. Please do not reply to this email.</div>
