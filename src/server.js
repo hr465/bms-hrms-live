@@ -154,6 +154,7 @@ for(const col of ["letterhead_top INTEGER","letterhead_bottom INTEGER","last_dig
   try{await db.exec(`ALTER TABLE companies ADD COLUMN ${col}`)}catch(e){}
 }
 try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){}
+try{await db.exec("ALTER TABLE users ADD COLUMN full_name TEXT")}catch(e){}
 for(const col of ["in_loc TEXT","out_loc TEXT"]){try{await db.exec(`ALTER TABLE attendance ADD COLUMN ${col}`)}catch(e){}}
 for(const col of ["reviewer TEXT","finalized_at TEXT","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
   try{await db.exec(`ALTER TABLE performance ADD COLUMN ${col}`)}catch(e){}
@@ -231,11 +232,11 @@ function token(req){
 }
 async function me(req){
   const t=token(req); if(!t)return null;
-  const row=await db.prepare(`SELECT u.id,u.username,u.role,u.employee_id,u.company_id,s.active_company_id FROM sessions s JOIN users u ON u.id=s.user_id
+  const row=await db.prepare(`SELECT u.id,u.username,u.full_name,u.role,u.employee_id,u.company_id,s.active_company_id FROM sessions s JOIN users u ON u.id=s.user_id
     WHERE s.token=? AND s.expires_at>? AND u.active=1`).get(t,Date.now());
   if(!row)return null;
   const effectiveCompany=row.role==="Super Admin"?(row.active_company_id||null):row.company_id;
-  return {id:row.id,username:row.username,role:row.role,employee_id:row.employee_id,company_id:effectiveCompany};
+  return {id:row.id,username:row.username,full_name:row.full_name,role:row.role,employee_id:row.employee_id,company_id:effectiveCompany};
 }
 async function auth(req,res,next){
   try{
@@ -385,7 +386,7 @@ app.delete("/api/images/employee/:id",auth,wrap(async(req,res)=>{
 }));
 
 app.get("/api/companies/:id/users",auth,roles("Super Admin"),wrap(async(req,res)=>{
-  res.json(await db.prepare("SELECT u.id,u.username,u.role,u.active,e.name AS employee_name FROM users u LEFT JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? ORDER BY u.id").all(req.params.id));
+  res.json(await db.prepare("SELECT u.id,u.username,u.full_name,u.role,u.active,e.name AS employee_name FROM users u LEFT JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? ORDER BY u.id").all(req.params.id));
 }));
 app.post("/api/users/:id/reset-password",auth,roles("Super Admin"),wrap(async(req,res)=>{
   const u=await db.prepare("SELECT id,username,role,company_id FROM users WHERE id=?").get(req.params.id);
@@ -437,7 +438,7 @@ app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
     await seedCompanyDefaults(companyId);
     if(x.logo){try{await storeImage("company",companyId,companyId,x.logo)}catch(e){console.warn("logo skipped:",e.message)}}
     const s=crypto.randomBytes(16).toString("hex");
-    await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email) VALUES(?,?,?,?,?)").run(companyId,x.admin_username,hash(x.admin_password,s),"HR Admin",x.contact_email||null);
+    await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email,full_name) VALUES(?,?,?,?,?,?)").run(companyId,x.admin_username,hash(x.admin_password,s),"HR Admin",x.contact_email||null,String(x.admin_name||"").trim()||null);
     await audit(req,"ONBOARD","COMPANY",x.name);
     if(x.contact_email){
       // Sent from the platform's own sender (not the company's Gmail, which is still being set up).
@@ -446,7 +447,7 @@ app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
       const domainBlock=dom.d?`<p><b>Your own web address:</b> https://${esc2(dom.d)}<br>To switch it on, add one DNS record at your domain provider: <b>Type A, Name ${esc2(dom.d.split(".")[0])}, Value ${esc2(ip)}</b>. Then tell us and we will activate the secure (HTTPS) certificate. Until then, use the login address above.</p>`:"";
       let att;try{att=[{filename:"HR-Portal-Training-Manual.pdf",content:await buildManualPdf(opts),contentType:"application/pdf"}]}catch(e){console.error("manual pdf",e.message)}
       sendMail(x.contact_email,`Welcome to the HR portal — ${x.name}`,layout("Your company workspace is ready",
-        `<p>Hi,</p><p>The HR workspace for <b>${esc2(x.name)}</b> has been created. You have been set up as the <b>HR Admin</b> with full access to your company.</p>
+        `<p>Hi${x.admin_name?" "+esc2(x.admin_name):""},</p><p>The HR workspace for <b>${esc2(x.name)}</b> has been created. You have been set up as the <b>HR Admin</b> with full access to your company.</p>
          <p><b>Login URL:</b> ${esc2(opts.platformUrl)}<br><b>Username:</b> ${esc2(x.admin_username)}<br><b>Password:</b> ${x.send_password?esc2(x.admin_password):"(shared with you separately)"}</p>
          ${domainBlock}
          <p><b>Getting started</b></p>
@@ -727,25 +728,28 @@ app.post("/api/reset-password",wrap(async(req,res)=>{
 /* ---------------- Team (internal, non-employee logins: Director, extra HR/Manager/Finance) ---------------- */
 const TEAM_ROLES=["Director","HR Admin","Manager","Finance"];
 app.get("/api/team",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
-  res.json(await db.prepare(`SELECT u.id,u.username,u.role,u.email,u.active,e.name employee_name,e.employee_code FROM users u LEFT JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.role<>'Employee' ORDER BY u.id DESC`).all(req.user.company_id));
+  res.json(await db.prepare(`SELECT u.id,u.username,u.full_name,u.role,u.email,u.active,e.name employee_name,e.employee_code FROM users u LEFT JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.role<>'Employee' ORDER BY u.id DESC`).all(req.user.company_id));
 }));
 app.post("/api/team",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
   if(!TEAM_ROLES.includes(x.role))return res.status(400).json({error:"Invalid role"});
   if(!x.username||!x.password||x.password.length<8)return res.status(400).json({error:"Username and a password (min 8 chars) are required"});
   if(await db.prepare("SELECT id FROM users WHERE username=?").get(x.username))return res.status(400).json({error:"Username already taken"});
+  let fullName=String(x.name||"").trim();
   let linkedEmployeeId=null;
   if(x.employee_id){
     const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(x.employee_id,req.user.company_id);
     if(!emp)return res.status(400).json({error:"Selected employee not found in this company"});
     linkedEmployeeId=emp.id;
+    if(!fullName){const en=await db.prepare("SELECT name FROM employees WHERE id=?").get(emp.id);fullName=en?.name||""}
   }
+  if(!fullName)return res.status(400).json({error:"Enter the person's name"});
   const s=crypto.randomBytes(16).toString("hex");
-  await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email,employee_id) VALUES(?,?,?,?,?,?)").run(req.user.company_id,x.username,hash(x.password,s),x.role,x.email||null,linkedEmployeeId);
+  await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email,employee_id,full_name) VALUES(?,?,?,?,?,?,?)").run(req.user.company_id,x.username,hash(x.password,s),x.role,x.email||null,linkedEmployeeId,fullName);
   await audit(req,"CREATE","TEAM",`${x.username} (${x.role})`);
   if(x.email){
     sendMail(x.email,"Your BMS HRMS login",layout("Welcome to the team",
-      `<p>Hi,</p><p>You've been added as <b>${x.role}</b> on BMS Enterprise HRMS.</p>
+      `<p>Hi ${esc2(fullName)},</p><p>You've been added as <b>${esc2(x.role)}</b> on the HR portal.</p>
        <p><b>Login URL:</b> ${req.protocol}://${req.get("host")}<br><b>Username:</b> ${x.username}<br><b>Password:</b> (the one shared with you)</p>`),
       await companySender(req.user.company_id)).catch(()=>{});
   }

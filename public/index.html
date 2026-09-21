@@ -292,7 +292,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 </section>
 
 <section id="team" class="page"><div class="pagehead"><h2>Team</h2><div class="desc">Manage internal logins — Director (final sign-off), extra HR/Manager/Finance accounts.</div></div>
-<div class="panel"><h3>Add team member</h3><div class="grid"><input id="tmUser" placeholder="Username"><input id="tmPass" type="password" placeholder="Password (min 8 chars)"><select id="tmRole"><option>Director</option><option>HR Admin</option><option>Manager</option><option>Finance</option></select><input id="tmEmail" placeholder="Email (for login notice)"><input id="tmEmpLink" list="empDL" placeholder="Link to employee record (optional)"></div><p class="small">Linking a Manager to their employee record lets them see only the team reporting to them.</p><button onclick="addTeamMember()">Add</button></div>
+<div class="panel"><h3>Add team member</h3><div class="grid"><input id="tmName" placeholder="Full name"><input id="tmUser" placeholder="Username"><input id="tmPass" type="password" placeholder="Password (min 8 chars)"><select id="tmRole"><option>Director</option><option>HR Admin</option><option>Manager</option><option>Finance</option></select><input id="tmEmail" placeholder="Email (for login notice)"><input id="tmEmpLink" list="empDL" placeholder="Link to employee record (optional)"></div><p class="small">Linking a Manager to their employee record lets them see only the team reporting to them.</p><button onclick="addTeamMember()">Add</button></div>
 <div id="teamTable" class="tblwrap"></div></section>
 <section id="performance" class="page"><div class="pagehead"><div><h2>Performance Reviews</h2><div class="desc">Rate employees on a 1 to 5 scale. Finalized reviews feed salary increments and Employee of the Month.</div></div></div>
 <div id="perfForm" class="panel" style="display:none"><h3 id="perfFormTitle">New review</h3>
@@ -417,6 +417,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 </div>
 <div class="small" style="margin:14px 0 8px;font-weight:700;color:#334155">First HR Admin login for this company</div>
 <div class="grid" style="grid-template-columns:1fr 1fr">
+<div class="field"><label>HR Admin name</label><input id="cmAdminName" placeholder="e.g. Priya Sharma"></div>
 <div class="field"><label>Admin Username</label><input id="cmAdminUser" placeholder="e.g. acme_hr"></div>
 <div class="field"><label>Admin Password</label><input id="cmAdminPass" type="password" placeholder="min 8 characters"></div>
 </div>
@@ -635,7 +636,7 @@ function navBuild(){
    if(!items.length)return "";
    return `<div class="navgroup"><div class="gt">${s.t}</div>${items.map(x=>`<button class="item" id="nav_${x[0]}" onclick="page('${x[0]}')"><span class="ic">${ICONS[x[0]]||""}</span>${x[1]}</button>`).join("")}</div>`;
  }).join("");
- $("whoName").textContent=ME.username;
+ $("whoName").textContent=ME.full_name||ME.username;
  $("whoRole").textContent=ME.role;
 $("avatarTxt").textContent=ME.username.slice(0,2).toUpperCase();
  $("avatarTxt").style.backgroundImage="";
@@ -817,9 +818,9 @@ function applyPlatformBrand(){
 }
 let CM_LOGO=null;
 function chooseNewLogo(){pickImage(320,d=>{CM_LOGO=d;$("cmLogoPrev").src=d;$("cmLogoPrev").style.display="block"})}
-function openCompanyModal(){CM_LOGO=null;$("cmLogoPrev").style.display="none";["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmDomain","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
+function openCompanyModal(){CM_LOGO=null;$("cmLogoPrev").style.display="none";["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmDomain","cmAdminName","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
 async function submitCompany(){
-  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,logo:CM_LOGO,send_password:$("cmSendPw").checked,domain:$("cmDomain").value,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
+  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,logo:CM_LOGO,send_password:$("cmSendPw").checked,domain:$("cmDomain").value,admin_name:$("cmAdminName").value,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
   try{await api("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("compModal").classList.remove("show");alert("Company onboarded successfully. Share the HR Admin credentials with the company so they can sign in and get started.");loadPage("companies");loadCompaniesCache();}
   catch(e){$("compErr").textContent=e.message}
 }
@@ -834,7 +835,7 @@ async function openUsers(id){
   $("usTitle").textContent="Logins — "+(c?c.name:"");$("usBody").innerHTML="Loading...";$("usersModal").classList.add("show");
   try{
     const us=await api(`/api/companies/${id}/users`);
-    $("usBody").innerHTML=us.length?`<table><thead><tr><th>Username</th><th>Role</th><th>Employee</th><th></th></tr></thead><tbody>`+us.map(u=>`<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.employee_name||"-")}</td><td><button class="sm gray" onclick="resetUserPw(${u.id})">Reset password</button></td></tr>`).join("")+`</tbody></table>`:"No logins yet.";
+    $("usBody").innerHTML=us.length?`<table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Employee</th><th></th></tr></thead><tbody>`+us.map(u=>`<tr><td>${esc(u.full_name||u.employee_name||"-")}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.employee_name||"-")}</td><td><button class="sm gray" onclick="resetUserPw(${u.id})">Reset password</button></td></tr>`).join("")+`</tbody></table>`:"No logins yet.";
   }catch(e){$("usBody").textContent=e.message}
 }
 async function resetUserPw(id){
@@ -1645,13 +1646,13 @@ async function loadCalendar(){
 /* ---------- Team ---------- */
 async function loadTeam(){
   const rows=await api("/api/team");
-  table("teamTable",["Username","Role","Linked Employee","Email","Status","Action"],rows.map(u=>[esc(u.username),`<span class="chip">${esc(u.role)}</span>`,u.employee_name?esc(u.employee_code+" - "+u.employee_name):"-",esc(u.email||"-"),statusBadge(u.active?"Active":"Inactive"),
+  table("teamTable",["Name","Username","Role","Linked Employee","Email","Status","Action"],rows.map(u=>[esc(u.full_name||u.employee_name||"-"),esc(u.username),`<span class="chip">${esc(u.role)}</span>`,u.employee_name?esc(u.employee_code+" - "+u.employee_name):"-",esc(u.email||"-"),statusBadge(u.active?"Active":"Inactive"),
     `<button class="sm ${u.active?'red':'green'}" onclick="toggleTeamStatus(${u.id},${u.active?0:1})">${u.active?"Deactivate":"Activate"}</button>`]));
 }
 async function addTeamMember(){
   const empId=$("tmEmpLink").value?resolveEmp("tmEmpLink"):null;
-  const body={username:$("tmUser").value,password:$("tmPass").value,role:$("tmRole").value,email:$("tmEmail").value,employee_id:empId};
-  try{await api("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Team member added");["tmUser","tmPass","tmEmail","tmEmpLink"].forEach(id=>$(id).value="");loadTeam();}catch(e){alert(e.message)}
+  const body={name:$("tmName").value,username:$("tmUser").value,password:$("tmPass").value,role:$("tmRole").value,email:$("tmEmail").value,employee_id:empId};
+  try{await api("/api/team",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});alert("Team member added");["tmName","tmUser","tmPass","tmEmail","tmEmpLink"].forEach(id=>$(id).value="");loadTeam();}catch(e){alert(e.message)}
 }
 async function toggleTeamStatus(id,active){try{await api(`/api/team/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({active})});loadTeam();}catch(e){alert(e.message)}}
 
