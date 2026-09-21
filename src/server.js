@@ -72,6 +72,16 @@ CREATE TABLE IF NOT EXISTS images(
 CREATE TABLE IF NOT EXISTS email_log(
  id SERIAL PRIMARY KEY,company_id INTEGER,to_addr TEXT,subject TEXT,status TEXT,error TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS leave_allotments(
+ company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,leave_type TEXT NOT NULL,days REAL DEFAULT 0,PRIMARY KEY(employee_id,leave_type)
+);
+CREATE TABLE IF NOT EXISTS loans(
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER,kind TEXT DEFAULT 'Loan',amount REAL DEFAULT 0,months INTEGER DEFAULT 1,emi REAL DEFAULT 0,
+ reason TEXT,status TEXT DEFAULT 'Pending',decided_by TEXT,decision_note TEXT,decided_at TEXT,start_month TEXT,disbursed_on TEXT,balance REAL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS loan_recoveries(
+ loan_id INTEGER NOT NULL,month TEXT NOT NULL,amount REAL DEFAULT 0,PRIMARY KEY(loan_id,month)
+);
 CREATE TABLE IF NOT EXISTS punches(
  id SERIAL PRIMARY KEY,company_id INTEGER,biometric_id TEXT,punch_time TEXT,punch_type TEXT,device_id INTEGER,raw_payload TEXT,
  UNIQUE(company_id,biometric_id,punch_time)
@@ -155,6 +165,9 @@ for(const col of ["offer_template TEXT","letterhead_top INTEGER","letterhead_bot
 }
 try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){}
 try{await db.exec("ALTER TABLE users ADD COLUMN full_name TEXT")}catch(e){}
+try{await db.exec("ALTER TABLE leave_requests ADD COLUMN decision_reason TEXT")}catch(e){}
+try{await db.exec("ALTER TABLE leave_types ADD COLUMN eligible_after_months INTEGER DEFAULT 0")}catch(e){}
+for(const col of ["claim_ref TEXT","kind TEXT DEFAULT 'Reimbursement'","bill_name TEXT","bill_mime TEXT","bill_data BYTEA","reject_reason TEXT","tour_place TEXT","tour_to TEXT"]){try{await db.exec(`ALTER TABLE expenses ADD COLUMN ${col}`)}catch(e){}}
 for(const col of ["status TEXT DEFAULT 'Issued'","employee_signature TEXT","employee_signed_name TEXT","employee_signed_at TEXT"]){try{await db.exec(`ALTER TABLE letters ADD COLUMN ${col}`)}catch(e){}}
 for(const col of ["in_loc TEXT","out_loc TEXT"]){try{await db.exec(`ALTER TABLE attendance ADD COLUMN ${col}`)}catch(e){}}
 for(const col of ["reviewer TEXT","finalized_at TEXT","created_at TEXT DEFAULT CURRENT_TIMESTAMP"]){
@@ -169,7 +182,7 @@ for(const col of ["reporting_manager_id INTEGER","pf_number TEXT","esic_number T
 for(const col of ["category TEXT DEFAULT 'Leave'"]){
   try{await db.exec(`ALTER TABLE leave_requests ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["utr TEXT","paid_at TEXT","paid_mode TEXT","basic REAL DEFAULT 0","hra REAL DEFAULT 0","pf_employee REAL DEFAULT 0","esic_employee REAL DEFAULT 0","tds REAL DEFAULT 0","lop_days REAL DEFAULT 0"]){
+for(const col of ["other_earnings REAL DEFAULT 0","other_earn_label TEXT","ded_label TEXT","loan_deduction REAL DEFAULT 0","utr TEXT","paid_at TEXT","paid_mode TEXT","basic REAL DEFAULT 0","hra REAL DEFAULT 0","pf_employee REAL DEFAULT 0","esic_employee REAL DEFAULT 0","tds REAL DEFAULT 0","lop_days REAL DEFAULT 0"]){
   try{await db.exec(`ALTER TABLE payroll ADD COLUMN ${col}`)}catch(e){}
 }
 for(const [oldN,newN] of [["Casual Leave","CL - Casual Leave"],["Sick Leave","SL - Sick Leave"],["Earned Leave","PL - Privilege Leave"]]){
@@ -1389,12 +1402,15 @@ async function notifyLeaveApplied(companyId,empId,x){
    <p style="margin-top:14px">Please review it in the HR portal.</p>`);
   for(const t of to)await sendMail(t,`${emp.name} applied for ${label}`,html,sender);
 }
-async function notifyLeaveDecision(companyId,leaveId,status,by){
-  const l=await db.prepare("SELECT l.*,e.email,e.name FROM leave_requests l JOIN employees e ON e.id=l.employee_id WHERE l.id=? AND l.company_id=?").get(leaveId,companyId);
-  if(!l?.email)return;
-  const sender=await companySender(companyId);
-  await sendMail(l.email,`Your request was ${String(status).toLowerCase()}`,layout(`Request ${status}`,
-    `<p>Hi ${esc2(l.name)}, your ${esc2(l.leave_type||l.category)} request (${esc2(l.from_date)} to ${esc2(l.to_date)}) has been <b>${esc2(status)}</b> by ${esc2(by)}.</p>`),sender);
+async function notifyLeaveDecision(companyId,leaveId,status,by,reason){
+  const l=await db.prepare("SELECT l.*,e.email,e.name,e.employee_code FROM leave_requests l JOIN employees e ON e.id=l.employee_id WHERE l.id=? AND l.company_id=?").get(leaveId,companyId);
+  if(!l)return;
+  const what=l.category==="Leave"?(l.leave_type||"leave"):l.category;
+  if(l.email)await notifyMany(companyId,[l.email],`Your request was ${String(status).toLowerCase()}`,`Request ${status}`,
+    `<p>Hi ${esc2(l.name)},</p><p>Your ${esc2(what)} request (${esc2(l.from_date)} to ${esc2(l.to_date)}) has been <b>${esc2(status)}</b> by ${esc2(by)}.</p>${reason?`<p><b>${status==="Rejected"?"Reason":"Note"}:</b> ${esc2(reason)}</p>`:""}`);
+  const fyi=(await roleEmails(companyId,["Director","HR Admin"])).filter(x=>x!==l.email);
+  await notifyMany(companyId,fyi,`${l.name}'s ${what} request was ${String(status).toLowerCase()}`,`Request ${status}`,
+    `<p>The ${esc2(what)} request of <b>${esc2(l.name)}</b> (${esc2(l.employee_code)}) for ${esc2(l.from_date)} to ${esc2(l.to_date)} (${esc2(l.days)} day(s)) was <b>${esc2(status)}</b> by ${esc2(by)}.</p>${reason?`<p><b>Reason:</b> ${esc2(reason)}</p>`:""}`);
 }
 const fmtHM=m=>Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";
 function istNow(){
@@ -1552,30 +1568,315 @@ app.get("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
   if(req.query.category){q+=" AND l.category=?";p.push(req.query.category)}
   q+=" ORDER BY l.id DESC";res.json(await db.prepare(q).all(...p));
 }));
+/* ---------------- Shared helpers for requests, approvals and notifications ---------------- */
+async function roleEmails(companyId,roleList){
+  const ph=roleList.map(()=>"?").join(",");
+  const direct=await db.prepare(`SELECT email FROM users WHERE company_id=? AND active=1 AND role IN (${ph}) AND email IS NOT NULL AND email<>''`).all(companyId,...roleList);
+  const linked=await db.prepare(`SELECT e.email FROM users u JOIN employees e ON e.id=u.employee_id WHERE u.company_id=? AND u.active=1 AND u.role IN (${ph}) AND e.email IS NOT NULL AND e.email<>''`).all(companyId,...roleList);
+  return [...new Set([...direct,...linked].map(r=>r.email))];
+}
+async function notifyMany(companyId,to,subject,title,html){
+  const sender=await companySender(companyId);
+  for(const t of [...new Set((to||[]).filter(Boolean))])await sendMail(t,subject,layout(title,html),sender);
+}
+const rowsHtml=pairs=>`<table style="border-collapse:collapse;font-size:14px">${pairs.filter(p=>p[1]!==undefined&&p[1]!==null&&p[1]!=="").map(([k,v])=>`<tr><td style="padding:4px 14px 4px 0;color:#64748b">${esc2(k)}</td><td>${esc2(v)}</td></tr>`).join("")}</table>`;
+const inrEm=n=>"Rs. "+Number(n||0).toLocaleString("en-IN");
+function addMonthsISO(d,n){
+  if(!d||!n)return null;
+  const x=new Date(String(d).slice(0,10)+"T00:00:00Z");if(isNaN(x))return null;
+  x.setUTCMonth(x.getUTCMonth()+Number(n));return x.toISOString().slice(0,10);
+}
+
+/* ---------------- Leave: policy, allotment, eligibility, approval with reason ---------------- */
+app.get("/api/leave-types",auth,requireCompany,wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT id,name,annual_balance,COALESCE(eligible_after_months,0) eligible_after_months FROM leave_types WHERE company_id=? ORDER BY id").all(req.user.company_id));
+}));
+app.post("/api/leave-types",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const x=req.body||{},name=String(x.name||"").trim();
+  const days=Number(x.annual_balance),months=Number(x.eligible_after_months||0);
+  if(!name)return res.status(400).json({error:"Enter the leave type name"});
+  if(!(days>=0&&days<=365))return res.status(400).json({error:"Days per year must be between 0 and 365"});
+  if(!(months>=0&&months<=60&&Number.isInteger(months)))return res.status(400).json({error:"Applicable after (months) must be a whole number between 0 and 60"});
+  if(x.id){
+    const old=await db.prepare("SELECT name FROM leave_types WHERE id=? AND company_id=?").get(x.id,req.user.company_id);
+    if(!old)return res.status(404).json({error:"Leave type not found"});
+    try{await db.prepare("UPDATE leave_types SET name=?,annual_balance=?,eligible_after_months=? WHERE id=? AND company_id=?").run(name,days,months,x.id,req.user.company_id)}
+    catch(e){return res.status(400).json({error:"A leave type with this name already exists"})}
+    if(old.name!==name){
+      await db.prepare("UPDATE leave_requests SET leave_type=? WHERE company_id=? AND leave_type=?").run(name,req.user.company_id,old.name);
+      await db.prepare("UPDATE leave_allotments SET leave_type=? WHERE company_id=? AND leave_type=?").run(name,req.user.company_id,old.name);
+    }
+  }else{
+    try{await db.prepare("INSERT INTO leave_types(company_id,name,annual_balance,eligible_after_months) VALUES(?,?,?,?)").run(req.user.company_id,name,days,months)}
+    catch(e){return res.status(400).json({error:"A leave type with this name already exists"})}
+  }
+  await audit(req,"UPDATE","LEAVE_POLICY",name);res.json({ok:true});
+}));
+app.delete("/api/leave-types/:id",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const t=await db.prepare("SELECT name FROM leave_types WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!t)return res.status(404).json({error:"Leave type not found"});
+  const used=await db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE company_id=? AND leave_type=?").get(req.user.company_id,t.name);
+  if(Number(used.c)>0)return res.status(400).json({error:"This leave type has been used in leave requests, so it cannot be deleted. Set its days to 0 instead."});
+  await db.prepare("DELETE FROM leave_allotments WHERE company_id=? AND leave_type=?").run(req.user.company_id,t.name);
+  await db.prepare("DELETE FROM leave_types WHERE id=?").run(req.params.id);
+  await audit(req,"DELETE","LEAVE_POLICY",t.name);res.json({ok:true});
+}));
+// Per-employee allotment overrides (for example 15 days of Casual Leave for one person instead of the company default).
+app.get("/api/leave-allotments",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT a.employee_id,a.leave_type,a.days,e.employee_code,e.name FROM leave_allotments a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY e.employee_code,a.leave_type").all(req.user.company_id));
+}));
+app.post("/api/leave-allotments",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const x=req.body||{};
+  const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(Number(x.employee_id),req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found"});
+  const t=await db.prepare("SELECT name FROM leave_types WHERE company_id=? AND name=?").get(req.user.company_id,x.leave_type);
+  if(!t)return res.status(400).json({error:"Choose a valid leave type"});
+  if(x.days===""||x.days===null||x.days===undefined){
+    await db.prepare("DELETE FROM leave_allotments WHERE employee_id=? AND leave_type=?").run(emp.id,t.name);
+  }else{
+    const d=Number(x.days);if(!(d>=0&&d<=365))return res.status(400).json({error:"Days must be between 0 and 365"});
+    await db.prepare("INSERT INTO leave_allotments(company_id,employee_id,leave_type,days) VALUES(?,?,?,?) ON CONFLICT(employee_id,leave_type) DO UPDATE SET days=excluded.days").run(req.user.company_id,emp.id,t.name,d);
+  }
+  await audit(req,"UPDATE","LEAVE_ALLOTMENT",`${emp.id}:${t.name}`);res.json({ok:true});
+}));
+async function leaveBalanceFor(companyId,eid){
+  const emp=await db.prepare("SELECT joining_date FROM employees WHERE id=? AND company_id=?").get(eid,companyId);
+  const year=new Date().getFullYear();
+  const types=await db.prepare("SELECT * FROM leave_types WHERE company_id=? ORDER BY id").all(companyId);
+  const allot=Object.fromEntries((await db.prepare("SELECT leave_type,days FROM leave_allotments WHERE employee_id=?").all(eid)).map(a=>[a.leave_type,Number(a.days)]));
+  const used=Object.fromEntries((await db.prepare(`SELECT leave_type,COALESCE(SUM(days),0) d FROM leave_requests WHERE employee_id=? AND company_id=? AND status='Approved' AND category='Leave' AND from_date LIKE ? GROUP BY leave_type`).all(eid,companyId,year+"%")).map(u=>[u.leave_type,Number(u.d)]));
+  const today=istNow().date;
+  return types.map(t=>{
+    const total=allot[t.name]!=null?allot[t.name]:Number(t.annual_balance||0);
+    const from=addMonthsISO(emp?.joining_date,t.eligible_after_months||0);
+    const eligible=!from||from<=today;
+    return {leave_type:t.name,annual_balance:total,used:used[t.name]||0,remaining:total-(used[t.name]||0),eligible,available_from:eligible?null:from,eligible_after_months:t.eligible_after_months||0,custom:allot[t.name]!=null};
+  });
+}
+app.get("/api/leaves/balance",auth,requireCompany,wrap(async(req,res)=>{
+  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.query.employee_id||req.user.employee_id);
+  if(!eid)return res.json([]);
+  res.json(await leaveBalanceFor(req.user.company_id,eid));
+}));
 app.post("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
   const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
   const category=["WFH","Permission"].includes(req.body.category)?req.body.category:"Leave";
+  if(!req.body.from_date||!req.body.to_date)return res.status(400).json({error:"Choose the from and to dates"});
+  if(req.body.to_date<req.body.from_date)return res.status(400).json({error:"The to date cannot be before the from date"});
+  const days=Number(req.body.days)||1;
+  if(category==="Leave"){
+    const bal=(await leaveBalanceFor(req.user.company_id,eid)).find(b=>b.leave_type===req.body.leave_type);
+    if(!bal)return res.status(400).json({error:"Choose a valid leave type"});
+    if(bal.available_from&&req.body.from_date<bal.available_from)return res.status(400).json({error:`${bal.leave_type} becomes available from ${fmtDate(bal.available_from)} (${bal.eligible_after_months} month(s) after joining).`});
+    if(bal.annual_balance>0&&days>bal.remaining)return res.status(400).json({error:`Only ${bal.remaining} day(s) of ${bal.leave_type} are left this year.`});
+  }
   const r=await db.prepare(`INSERT INTO leave_requests(company_id,employee_id,leave_type,from_date,to_date,days,reason,category) VALUES(?,?,?,?,?,?,?,?)`)
-    .run(req.user.company_id,eid,req.body.leave_type,req.body.from_date,req.body.to_date,Number(req.body.days)||1,req.body.reason||"",category);
+    .run(req.user.company_id,eid,req.body.leave_type,req.body.from_date,req.body.to_date,days,req.body.reason||"",category);
   await audit(req,"CREATE","LEAVE",String(r.lastInsertRowid));res.json({id:r.lastInsertRowid});
   notifyLeaveApplied(req.user.company_id,eid,{category,...req.body}).catch(e=>console.error("leave notify",e.message));
 }));
 app.post("/api/leaves/:id/status",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>{
-  const r=await db.prepare("UPDATE leave_requests SET status=?,approved_by=? WHERE id=? AND company_id=?").run(req.body.status,req.user.username,req.params.id,req.user.company_id);
+  const status=String(req.body.status||""),reason=String(req.body.reason||"").trim();
+  if(!["Approved","Rejected"].includes(status))return res.status(400).json({error:"Choose Approved or Rejected"});
+  if(status==="Rejected"&&!reason)return res.status(400).json({error:"Please give a reason for rejecting this request."});
+  const r=await db.prepare("UPDATE leave_requests SET status=?,approved_by=?,decision_reason=? WHERE id=? AND company_id=?").run(status,req.user.username,reason||null,req.params.id,req.user.company_id);
   if(r.changes===0)return res.status(404).json({error:"Leave request not found"});
-  await audit(req,req.body.status,"LEAVE",req.params.id);res.json({ok:true});
-  notifyLeaveDecision(req.user.company_id,req.params.id,req.body.status,req.user.username).catch(e=>console.error("leave notify",e.message));
+  await audit(req,status,"LEAVE",req.params.id);res.json({ok:true});
+  notifyLeaveDecision(req.user.company_id,req.params.id,status,req.user.full_name||req.user.username,reason).catch(e=>console.error("leave notify",e.message));
 }));
-app.get("/api/leaves/balance",auth,requireCompany,wrap(async(req,res)=>{
-  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.query.employee_id||req.user.employee_id);
-  if(!eid)return res.json([]);
-  const year=new Date().toISOString().slice(0,4);
-  const types=await db.prepare("SELECT * FROM leave_types WHERE company_id=?").all(req.user.company_id);
-  const used=await db.prepare(`SELECT leave_type,COALESCE(SUM(days),0) d FROM leave_requests WHERE employee_id=? AND company_id=? AND status='Approved' AND category='Leave' AND from_date LIKE ? GROUP BY leave_type`).all(eid,req.user.company_id,year+"%");
-  const usedMap=Object.fromEntries(used.map(u=>[u.leave_type,u.d]));
-  res.json(types.map(t=>({leave_type:t.name,annual_balance:t.annual_balance,used:usedMap[t.name]||0,remaining:t.annual_balance-(usedMap[t.name]||0)})));
+
+/* ---------------- Loans and salary advances ---------------- */
+async function loanDue(empId,month){
+  const loans=await db.prepare("SELECT * FROM loans WHERE employee_id=? AND status='Approved' AND start_month<=?").all(empId,month);
+  const due=[];
+  for(const l of loans){
+    const paid=Number((await db.prepare("SELECT COALESCE(SUM(amount),0) s FROM loan_recoveries WHERE loan_id=? AND month<>?").get(l.id,month)).s);
+    const remaining=Number(l.amount)-paid;
+    if(remaining<=0)continue;
+    due.push({id:l.id,kind:l.kind,amount:Math.min(Number(l.emi)||remaining,remaining)});
+  }
+  return due;
+}
+async function recordLoanRecoveries(empId,month,due){
+  for(const d of due){
+    await db.prepare("INSERT INTO loan_recoveries(loan_id,month,amount) VALUES(?,?,?) ON CONFLICT(loan_id,month) DO UPDATE SET amount=excluded.amount").run(d.id,month,d.amount);
+    const l=await db.prepare("SELECT amount FROM loans WHERE id=?").get(d.id);
+    const paid=Number((await db.prepare("SELECT COALESCE(SUM(amount),0) s FROM loan_recoveries WHERE loan_id=?").get(d.id)).s);
+    const bal=Math.max(0,Number(l.amount)-paid);
+    await db.prepare("UPDATE loans SET balance=?,status=? WHERE id=?").run(bal,bal<=0?"Closed":"Approved",d.id);
+  }
+}
+app.get("/api/loans",auth,requireCompany,wrap(async(req,res)=>{
+  let q="SELECT l.*,e.employee_code,e.name employee_name FROM loans l JOIN employees e ON e.id=l.employee_id WHERE l.company_id=?";const p=[req.user.company_id];
+  if(req.user.role==="Employee"||req.user.role==="Manager"){q+=" AND l.employee_id=?";p.push(req.user.employee_id||0)}
+  else if(!["Super Admin","HR Admin","Finance","Director"].includes(req.user.role))return res.status(403).json({error:"Permission denied"});
+  res.json(await db.prepare(q+" ORDER BY l.id DESC").all(...p));
+}));
+app.post("/api/loans",auth,requireCompany,wrap(async(req,res)=>{
+  const eid=["Employee","Manager"].includes(req.user.role)?req.user.employee_id:Number(req.body.employee_id);
+  const emp=eid?await db.prepare("SELECT id,name,employee_code FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id):null;
+  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
+  const x=req.body||{};
+  const kind=x.kind==="Salary Advance"?"Salary Advance":"Loan";
+  const amount=Number(x.amount),months=kind==="Salary Advance"?1:Math.round(Number(x.months)||0);
+  if(!(amount>0))return res.status(400).json({error:"Enter the amount you need"});
+  if(!(months>=1&&months<=36))return res.status(400).json({error:"Choose the number of monthly instalments (1 to 36)"});
+  if(!String(x.reason||"").trim())return res.status(400).json({error:"Please give the reason for the request"});
+  const open=await db.prepare("SELECT COUNT(*) c FROM loans WHERE employee_id=? AND status IN ('Pending','Approved')").get(emp.id);
+  if(Number(open.c)>=3)return res.status(400).json({error:"You already have open loan or advance requests. Please clear them first."});
+  const r=await db.prepare("INSERT INTO loans(company_id,employee_id,kind,amount,months,emi,reason,balance) VALUES(?,?,?,?,?,?,?,?)").run(req.user.company_id,emp.id,kind,amount,months,Math.ceil(amount/months),String(x.reason).trim(),amount);
+  await audit(req,"CREATE","LOAN",String(r.lastInsertRowid));res.json({id:r.lastInsertRowid});
+  roleEmails(req.user.company_id,["HR Admin","Finance"]).then(to=>notifyMany(req.user.company_id,to,`${kind} request — ${emp.name}`,`New ${kind.toLowerCase()} request`,
+    `<p><b>${esc2(emp.name)}</b> (${esc2(emp.employee_code)}) has requested a ${esc2(kind.toLowerCase())}.</p>${rowsHtml([["Amount",inrEm(amount)],["Instalments",months],["Reason",x.reason]])}<p style="margin-top:12px">Please review it in the HR portal under Loans &amp; Advances.</p>`)).catch(e=>console.error("loan mail",e.message));
+}));
+app.post("/api/loans/:id/decision",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const l=await db.prepare("SELECT l.*,e.email,e.name FROM loans l JOIN employees e ON e.id=l.employee_id WHERE l.id=? AND l.company_id=?").get(req.params.id,req.user.company_id);
+  if(!l)return res.status(404).json({error:"Request not found"});
+  if(l.status!=="Pending")return res.status(400).json({error:"This request has already been decided"});
+  const x=req.body||{},note=String(x.note||"").trim();
+  const by=req.user.full_name||req.user.username;
+  if(x.action==="reject"){
+    if(!note)return res.status(400).json({error:"Please give a reason for rejecting this request"});
+    await db.prepare("UPDATE loans SET status='Rejected',decided_by=?,decision_note=?,decided_at=?,balance=0 WHERE id=?").run(by,note,new Date().toISOString(),l.id);
+  }else if(x.action==="approve"){
+    const months=Math.round(Number(x.months)||l.months),start=/^\d{4}-\d{2}$/.test(x.start_month||"")?x.start_month:istNow().date.slice(0,7);
+    if(!(months>=1&&months<=36))return res.status(400).json({error:"Instalments must be between 1 and 36"});
+    const emi=Math.ceil(Number(l.amount)/months);
+    await db.prepare("UPDATE loans SET status='Approved',months=?,emi=?,start_month=?,decided_by=?,decision_note=?,decided_at=?,balance=amount WHERE id=?").run(months,emi,start,by,note||null,new Date().toISOString(),l.id);
+  }else return res.status(400).json({error:"Choose approve or reject"});
+  await audit(req,x.action.toUpperCase(),"LOAN",String(l.id));res.json({ok:true});
+  if(l.email){
+    const fresh=await db.prepare("SELECT * FROM loans WHERE id=?").get(l.id);
+    notifyMany(req.user.company_id,[l.email],`Your ${l.kind.toLowerCase()} request was ${fresh.status.toLowerCase()}`,`${l.kind} request ${fresh.status}`,
+      `<p>Hi ${esc2(l.name)},</p><p>Your ${esc2(l.kind.toLowerCase())} request of <b>${inrEm(l.amount)}</b> has been <b>${esc2(fresh.status.toLowerCase())}</b> by ${esc2(by)}.</p>${fresh.status==="Approved"?rowsHtml([["Monthly deduction",inrEm(fresh.emi)],["Instalments",fresh.months],["Deduction starts",fresh.start_month]]):""}${note?`<p><b>${fresh.status==="Rejected"?"Reason":"Note"}:</b> ${esc2(note)}</p>`:""}<p>The monthly deduction is taken automatically from your salary.</p>`).catch(()=>{});
+  }
+}));
+app.post("/api/loans/:id/cancel",auth,requireCompany,wrap(async(req,res)=>{
+  const l=await db.prepare("SELECT * FROM loans WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!l)return res.status(404).json({error:"Request not found"});
+  if(req.user.employee_id!==l.employee_id)return res.status(403).json({error:"Permission denied"});
+  if(l.status!=="Pending")return res.status(400).json({error:"Only a pending request can be cancelled"});
+  await db.prepare("UPDATE loans SET status='Cancelled',balance=0 WHERE id=?").run(l.id);res.json({ok:true});
+}));
+app.post("/api/loans/:id/disburse",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const d=/^\d{4}-\d{2}-\d{2}$/.test(req.body?.date||"")?req.body.date:istNow().date;
+  const r=await db.prepare("UPDATE loans SET disbursed_on=? WHERE id=? AND company_id=? AND status IN ('Approved','Closed')").run(d,req.params.id,req.user.company_id);
+  if(r.changes===0)return res.status(400).json({error:"Only an approved request can be marked as paid out"});
+  res.json({ok:true});
+}));
+
+/* ---------------- Expenses: several lines with bills, and tour advances ---------------- */
+const BILL_MIME=/^(application\/pdf|image\/(png|jpeg|webp))$/;
+async function nextClaimRef(companyId,kind){
+  const yr=new Date().getFullYear();
+  const n=Number((await db.prepare("SELECT COUNT(DISTINCT claim_ref) c FROM expenses WHERE company_id=? AND claim_ref LIKE ?").get(companyId,`%/${yr}/%`)).c)+1;
+  return `${kind==="Tour Advance"?"TAD":"EXP"}/${yr}/${String(n).padStart(4,"0")}`;
+}
+app.get("/api/expenses",auth,requireCompany,wrap(async(req,res)=>{
+  let q=`SELECT x.id,x.company_id,x.employee_id,x.category,x.amount,x.expense_date,x.description,x.status,x.claim_ref,x.kind,x.bill_name,x.reject_reason,x.tour_place,x.tour_to,(x.bill_data IS NOT NULL) AS has_bill,e.name employee_name,e.employee_code FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?`;let p=[req.user.company_id];
+  if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
+  q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
+}));
+app.get("/api/expenses/:id/bill",auth,requireCompany,wrap(async(req,res)=>{
+  const x=await db.prepare("SELECT x.bill_name,x.bill_mime,x.bill_data,x.employee_id,e.reporting_manager_id FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.id=? AND x.company_id=?").get(req.params.id,req.user.company_id);
+  if(!x||!x.bill_data)return res.status(404).json({error:"Bill not found"});
+  if(req.user.role==="Employee"&&x.employee_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
+  if(req.user.role==="Manager"&&x.employee_id!==req.user.employee_id&&x.reporting_manager_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
+  res.set({"Content-Type":x.bill_mime||"application/octet-stream","Content-Disposition":`inline; filename="${String(x.bill_name||"bill").replace(/[^\w.\-]/g,"_")}"`,"X-Content-Type-Options":"nosniff"});
+  res.send(x.bill_data);
+}));
+// One submission can hold several expense lines (each with its own bill) or a single tour advance request.
+app.post("/api/expenses/batch",auth,requireCompany,wrap(async(req,res)=>{
+  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
+  const emp=await db.prepare("SELECT id,name,employee_code FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
+  const kind=req.body.kind==="Tour Advance"?"Tour Advance":"Reimbursement";
+  const items=Array.isArray(req.body.items)?req.body.items.slice(0,15):[];
+  if(!items.length)return res.status(400).json({error:"Add at least one line"});
+  const ref=await nextClaimRef(req.user.company_id,kind);
+  let total=0;
+  const prepared=[];
+  for(const [i,it] of items.entries()){
+    const amount=Number(it.amount);
+    if(!(amount>0))return res.status(400).json({error:`Line ${i+1}: enter the amount`});
+    if(kind==="Reimbursement"&&!String(it.category||"").trim())return res.status(400).json({error:`Line ${i+1}: enter the category`});
+    if(kind==="Reimbursement"&&!it.expense_date)return res.status(400).json({error:`Line ${i+1}: choose the date`});
+    if(kind==="Tour Advance"&&(!String(it.tour_place||"").trim()||!it.expense_date||!it.tour_to))return res.status(400).json({error:"Enter the destination and the tour dates"});
+    let bill=null;
+    if(it.bill&&it.bill.base64){
+      if(!BILL_MIME.test(String(it.bill.mime||"")))return res.status(400).json({error:`Line ${i+1}: the bill must be a PDF, JPG, PNG or WebP file`});
+      if(it.bill.base64.length>7000000)return res.status(400).json({error:`Line ${i+1}: the bill is too large (maximum 5 MB)`});
+      bill={name:String(it.bill.name||"bill").slice(0,120),mime:it.bill.mime,data:Buffer.from(it.bill.base64,"base64")};
+    }
+    total+=amount;prepared.push({it,amount,bill});
+  }
+  for(const {it,amount,bill} of prepared){
+    await db.prepare("INSERT INTO expenses(company_id,employee_id,category,amount,expense_date,description,claim_ref,kind,bill_name,bill_mime,bill_data,tour_place,tour_to) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(req.user.company_id,emp.id,kind==="Tour Advance"?"Tour Advance":String(it.category).trim(),amount,it.expense_date,String(it.description||"").slice(0,500),ref,kind,bill?.name||null,bill?.mime||null,bill?.data||null,kind==="Tour Advance"?String(it.tour_place).trim():null,kind==="Tour Advance"?it.tour_to:null);
+  }
+  await audit(req,"CREATE","EXPENSE",ref);res.json({ok:true,claim_ref:ref,lines:prepared.length,total});
+  roleEmails(req.user.company_id,["HR Admin","Finance"]).then(to=>notifyMany(req.user.company_id,to,`${kind==="Tour Advance"?"Tour advance request":"Expense claim"} ${ref} — ${emp.name}`,kind==="Tour Advance"?"New tour advance request":"New expense claim",
+    `<p><b>${esc2(emp.name)}</b> (${esc2(emp.employee_code)}) submitted ${kind==="Tour Advance"?"a tour advance request":`an expense claim of ${prepared.length} line(s)`}.</p>${rowsHtml([["Reference",ref],["Total",inrEm(total)]])}<p style="margin-top:12px">Please review it in the HR portal under Expenses.</p>`)).catch(e=>console.error("expense mail",e.message));
+}));
+app.post("/api/expenses/:id/status",auth,requireCompany,roles("Super Admin","HR Admin","Finance","Manager"),wrap(async(req,res)=>{
+  const status=String(req.body.status||""),reason=String(req.body.reason||"").trim();
+  if(!["Approved","Rejected","Paid"].includes(status))return res.status(400).json({error:"Choose Approved, Rejected or Paid"});
+  if(status==="Rejected"&&!reason)return res.status(400).json({error:"Please give a reason for rejecting this claim"});
+  const x=await db.prepare("SELECT x.*,e.email,e.name FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.id=? AND x.company_id=?").get(req.params.id,req.user.company_id);
+  if(!x)return res.status(404).json({error:"Expense not found"});
+  await db.prepare("UPDATE expenses SET status=?,reject_reason=? WHERE id=?").run(status,status==="Rejected"?reason:null,x.id);
+  await audit(req,status,"EXPENSE",String(x.id));res.json({ok:true});
+  if(x.email)notifyMany(req.user.company_id,[x.email],`Your ${x.kind==="Tour Advance"?"tour advance":"expense claim"} was ${status.toLowerCase()}`,`${x.kind==="Tour Advance"?"Tour advance":"Expense claim"} ${status}`,
+    `<p>Hi ${esc2(x.name)},</p><p>Your ${x.kind==="Tour Advance"?"tour advance request":"expense claim"} <b>${esc2(x.claim_ref||"")}</b> (${esc2(x.category)}, ${inrEm(x.amount)}) has been <b>${esc2(status.toLowerCase())}</b>.</p>${status==="Rejected"?`<p><b>Reason:</b> ${esc2(reason)}</p>`:""}`).catch(()=>{});
+}));
+
+/* ---------------- Helpdesk tickets with email ---------------- */
+app.get("/api/tickets",auth,requireCompany,wrap(async(req,res)=>{
+  let q=`SELECT t.*,e.name employee_name,e.employee_code FROM tickets t JOIN employees e ON e.id=t.employee_id WHERE t.company_id=?`;let p=[req.user.company_id];
+  if(req.user.role==="Employee"){q+=" AND t.employee_id=?";p.push(req.user.employee_id)}q+=" ORDER BY t.id DESC";res.json(await db.prepare(q).all(...p));
+}));
+app.post("/api/tickets",auth,requireCompany,wrap(async(req,res)=>{
+  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
+  const emp=await db.prepare("SELECT id,name,email,employee_code FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
+  const x=req.body;
+  if(!String(x.subject||"").trim())return res.status(400).json({error:"Enter the subject"});
+  const r=await db.prepare("INSERT INTO tickets(company_id,employee_id,subject,description,priority) VALUES(?,?,?,?,?)").run(req.user.company_id,eid,String(x.subject).trim(),x.description||"",x.priority||"Medium");
+  res.json({id:r.lastInsertRowid});
+  const no=`#${r.lastInsertRowid}`;
+  (async()=>{
+    const hr=await roleEmails(req.user.company_id,["HR Admin"]);
+    const co=await db.prepare("SELECT contact_email FROM companies WHERE id=?").get(req.user.company_id);
+    await notifyMany(req.user.company_id,[...hr,co?.contact_email],`New helpdesk ticket ${no} — ${x.subject}`,"New helpdesk ticket",
+      `<p><b>${esc2(emp.name)}</b> (${esc2(emp.employee_code)}) raised a ticket.</p>${rowsHtml([["Ticket",no],["Subject",x.subject],["Priority",x.priority||"Medium"],["Details",x.description]])}<p style="margin-top:12px">Please respond in the HR portal under HR Helpdesk.</p>`);
+    if(emp.email)await notifyMany(req.user.company_id,[emp.email],`We received your ticket ${no}`,"Your ticket was received",`<p>Hi ${esc2(emp.name)},</p><p>Your ticket <b>${no}</b> (${esc2(x.subject)}) has been received. The HR team will get back to you soon. You will get an email when its status changes.</p>`);
+  })().catch(e=>console.error("ticket mail",e.message));
+}));
+app.post("/api/tickets/:id/status",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>{
+  const t=await db.prepare("SELECT t.*,e.email,e.name FROM tickets t JOIN employees e ON e.id=t.employee_id WHERE t.id=? AND t.company_id=?").get(req.params.id,req.user.company_id);
+  if(!t)return res.status(404).json({error:"Ticket not found"});
+  const note=String(req.body.note||"").trim();
+  await db.prepare("UPDATE tickets SET status=?,assigned_to=? WHERE id=?").run(req.body.status,req.user.username,t.id);
+  res.json({ok:true});
+  if(t.email)notifyMany(req.user.company_id,[t.email],`Your ticket #${t.id} is now ${req.body.status}`,"Ticket update",
+    `<p>Hi ${esc2(t.name)},</p><p>Your ticket <b>#${t.id}</b> (${esc2(t.subject)}) is now <b>${esc2(req.body.status)}</b>.</p>${note?`<p><b>Note from HR:</b> ${esc2(note)}</p>`:""}`).catch(()=>{});
+}));
+
+/* ---------------- Resignation: only the employee submits it ---------------- */
+app.post("/api/exits",auth,requireCompany,wrap(async(req,res)=>{
+  if(req.user.role!=="Employee")return res.status(403).json({error:"Only the employee can submit a resignation."});
+  const emp=await db.prepare("SELECT id,name,employee_code FROM employees WHERE id=? AND company_id=?").get(req.user.employee_id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
+  const x=req.body;
+  if(!x.resignation_date||!x.last_working_date)return res.status(400).json({error:"Enter the resignation date and the last working date"});
+  if(await db.prepare("SELECT id FROM exit_requests WHERE employee_id=? AND status='Pending'").get(emp.id))return res.status(400).json({error:"You already have a resignation waiting for approval"});
+  const r=await db.prepare("INSERT INTO exit_requests(company_id,employee_id,resignation_date,last_working_date,reason) VALUES(?,?,?,?,?)").run(req.user.company_id,emp.id,x.resignation_date,x.last_working_date,x.reason||"");
+  res.json({id:r.lastInsertRowid});
+  roleEmails(req.user.company_id,["HR Admin","Director"]).then(to=>notifyMany(req.user.company_id,to,`Resignation submitted — ${emp.name}`,"Resignation submitted",
+    `<p><b>${esc2(emp.name)}</b> (${esc2(emp.employee_code)}) has submitted a resignation.</p>${rowsHtml([["Resignation date",x.resignation_date],["Last working date",x.last_working_date],["Reason",x.reason]])}`)).catch(e=>console.error("exit mail",e.message));
 }));
 
 
@@ -1623,8 +1924,9 @@ async function buildPayslipPdf(companyId,p,emp){
     doc.font("Helvetica").fontSize(8.5).fillColor("#64748b").text(`Days in month: ${dim}    Paid days: ${(dim-lop).toFixed(1).replace(/\.0$/,"")}    LOP days: ${lop}`,L,y);y+=20;
     // earnings and deductions
     const basic=Number(p.basic||0),hra=Number(p.hra||0),gross=Number(p.gross||0),other=Math.max(0,gross-basic-hra),ot=Number(p.ot||0);
-    const earn=[["Basic",basic],["HRA",hra],["Other allowances",other],["Overtime",ot]].filter(r=>r[1]>0||r[0]==="Basic");
-    const ded=[["Loss of pay",p.lop],["PF (employee)",p.pf_employee],["ESIC (employee)",p.esic_employee],["TDS",p.tds],["Other deductions",p.deductions]].filter(r=>Number(r[1])>0);
+    const otherEarn=Number(p.other_earnings||0);
+    const earn=[["Basic",basic],["HRA",hra],["Other allowances",other],["Overtime",ot],["Other earnings"+(p.other_earn_label?" ("+p.other_earn_label+")":""),otherEarn]].filter(r=>r[1]>0||r[0]==="Basic");
+    const ded=[["Loss of pay",p.lop],["PF (employee)",p.pf_employee],["ESIC (employee)",p.esic_employee],["TDS",p.tds],["Other deductions"+(p.ded_label?" ("+p.ded_label+")":""),p.deductions],["Loan / advance recovery",p.loan_deduction]].filter(r=>Number(r[1])>0);
     const hw=(W-10)/2,xe=L,xd=L+hw+10;
     doc.rect(xe,y,hw,20).fill("#eef2ff");doc.rect(xd,y,hw,20).fill("#eef2ff");
     doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#312e81").text("EARNINGS",xe+8,y+6).text("DEDUCTIONS",xd+8,y+6);
@@ -1635,7 +1937,7 @@ async function buildPayslipPdf(companyId,p,emp){
       if(ded[i]){doc.text(ded[i][0],xd+8,y,{width:hw-110});doc.text(inr(ded[i][1]),xd+hw-108,y,{width:100,align:"right"})}
       y+=17;
     }
-    const totE=basic+hra+other+ot,totD=ded.reduce((a,r)=>a+Number(r[1]),0);
+    const totE=basic+hra+other+ot+otherEarn,totD=ded.reduce((a,r)=>a+Number(r[1]),0);
     doc.moveTo(xe,y).lineTo(xe+hw,y).lineWidth(.6).strokeColor("#cbd5e1").stroke();doc.moveTo(xd,y).lineTo(xd+hw,y).stroke();y+=5;
     doc.font("Helvetica-Bold").fontSize(9.5).text("Total earnings",xe+8,y).text(inr(totE),xe+hw-108,y,{width:100,align:"right"}).text("Total deductions",xd+8,y).text(inr(totD),xd+hw-108,y,{width:100,align:"right"});
     y+=26;
@@ -1751,11 +2053,16 @@ async function processOnePayroll(req,employeeId,month,overrides={}){
   const pfEmployee=overrides.pf_employee!=null?Number(overrides.pf_employee):calc.pfEmployee;
   const esicEmployee=overrides.esic_employee!=null?Number(overrides.esic_employee):calc.esicEmployee;
   const tds=Number(overrides.tds)||0;
-  const net=+(gross-deductions-lop-pfEmployee-esicEmployee-tds+ot).toFixed(2);
+  const otherEarn=Number(overrides.other_earnings)||0;
+  const earnLabel=String(overrides.other_earn_label||"").trim().slice(0,60)||null,dedLabel=String(overrides.ded_label||"").trim().slice(0,60)||null;
+  const loanRows=overrides.loan_deduction!=null?null:await loanDue(emp.id,month);
+  const loanDed=overrides.loan_deduction!=null?Number(overrides.loan_deduction)||0:loanRows.reduce((a,r)=>a+r.amount,0);
+  const net=+(gross-deductions-lop-pfEmployee-esicEmployee-tds+ot+otherEarn-loanDed).toFixed(2);
   const no="BMS-"+Date.now()+"-"+employeeId;
-  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no,pf_employee,esic_employee,tds,lop_days,basic,hra) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no,pf_employee=excluded.pf_employee,esic_employee=excluded.esic_employee,tds=excluded.tds,lop_days=excluded.lop_days,basic=excluded.basic,hra=excluded.hra,utr=NULL,paid_at=NULL,paid_mode=NULL`)
-    .run(req.user.company_id,employeeId,month,gross,deductions,lop,ot,net,overrides.status||"Processed",no,pfEmployee,esicEmployee,tds,calc.lopDays,calc.basic,calc.hra);
+  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no,pf_employee,esic_employee,tds,lop_days,basic,hra,other_earnings,other_earn_label,ded_label,loan_deduction) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no,pf_employee=excluded.pf_employee,esic_employee=excluded.esic_employee,tds=excluded.tds,lop_days=excluded.lop_days,basic=excluded.basic,hra=excluded.hra,other_earnings=excluded.other_earnings,other_earn_label=excluded.other_earn_label,ded_label=excluded.ded_label,loan_deduction=excluded.loan_deduction,utr=NULL,paid_at=NULL,paid_mode=NULL`)
+    .run(req.user.company_id,employeeId,month,gross,deductions,lop,ot,net,overrides.status||"Processed",no,pfEmployee,esicEmployee,tds,calc.lopDays,calc.basic,calc.hra,otherEarn,earnLabel,dedLabel,loanDed);
+  if(loanRows&&loanRows.length)await recordLoanRecoveries(emp.id,month,loanRows);
   await audit(req,"UPSERT","PAYROLL",month+":"+emp.employee_code);
   const row=await db.prepare("SELECT * FROM payroll WHERE employee_id=? AND month=?").get(employeeId,month);
   if(row)sendPayslipEmail(req.user.company_id,row,emp,false).catch(e=>console.error("payslip mail",e.message));
@@ -1769,7 +2076,9 @@ app.get("/api/payroll/calculate",auth,requireCompany,roles("Super Admin","HR Adm
   const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.query.employee_id,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
   if(!req.query.month)return res.status(400).json({error:"month is required (YYYY-MM)"});
-  res.json(await computePayroll(req.user.company_id,emp,req.query.month));
+  const c=await computePayroll(req.user.company_id,emp,req.query.month);
+  c.loanDeduction=(await loanDue(emp.id,req.query.month)).reduce((a,r)=>a+r.amount,0);
+  res.json(c);
 }));
 app.post("/api/payroll/run-month",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
   const month=req.body.month;
@@ -1936,31 +2245,17 @@ app.get("/api/increments",auth,requireCompany,roles("Super Admin","HR Admin","Di
   res.json(await db.prepare(`SELECT i.*,e.employee_code,e.name FROM increments i JOIN employees e ON e.id=i.employee_id WHERE i.company_id=? ORDER BY i.id DESC LIMIT 500`).all(req.user.company_id));
 }));
 
-app.get("/api/assets",auth,requireCompany,wrap(async(req,res)=>res.json(await db.prepare(`SELECT a.*,e.name employee_name,e.employee_code FROM assets a LEFT JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY a.id DESC`).all(req.user.company_id))));
+app.get("/api/assets",auth,requireCompany,wrap(async(req,res)=>{
+  let q=`SELECT a.*,e.name employee_name,e.employee_code FROM assets a LEFT JOIN employees e ON e.id=a.employee_id WHERE a.company_id=?`;const p=[req.user.company_id];
+  if(req.user.role==="Employee"){q+=" AND a.employee_id=?";p.push(req.user.employee_id||0)}
+  res.json(await db.prepare(q+" ORDER BY a.id DESC").all(...p));
+}));
 app.post("/api/assets",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
   try{
     const r=await db.prepare("INSERT INTO assets(company_id,asset_code,name,category,serial_no,status,employee_id,issued_date) VALUES(?,?,?,?,?,?,?,?)").run(req.user.company_id,x.asset_code,x.name,x.category,x.serial_no,x.status||"Available",x.employee_id||null,x.issued_date||null);
     res.json({id:r.lastInsertRowid});
   }catch(e){res.status(400).json({error:/duplicate key|unique/i.test(e.message)?"Asset code already exists":e.message})}
-}));
-
-app.get("/api/expenses",auth,requireCompany,wrap(async(req,res)=>{
-  let q=`SELECT x.*,e.name employee_name,e.employee_code FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?`;let p=[req.user.company_id];
-  if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id)}
-  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
-  q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
-}));
-app.post("/api/expenses",auth,requireCompany,wrap(async(req,res)=>{
-  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
-  const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
-  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const x=req.body;const r=await db.prepare("INSERT INTO expenses(company_id,employee_id,category,amount,expense_date,description) VALUES(?,?,?,?,?,?)").run(req.user.company_id,eid,x.category,Number(x.amount)||0,x.expense_date,x.description||"");
-  res.json({id:r.lastInsertRowid});
-}));
-app.post("/api/expenses/:id/status",auth,requireCompany,roles("Super Admin","HR Admin","Finance","Manager"),wrap(async(req,res)=>{
-  const r=await db.prepare("UPDATE expenses SET status=? WHERE id=? AND company_id=?").run(req.body.status,req.params.id,req.user.company_id);
-  if(r.changes===0)return res.status(404).json({error:"Expense not found"});res.json({ok:true});
 }));
 
 app.get("/api/documents",auth,requireCompany,wrap(async(req,res)=>{
@@ -1994,11 +2289,18 @@ app.get("/api/announcements",auth,requireCompany,wrap(async(req,res)=>res.json(a
 async function publishAnnouncement(companyId,title,body,audience="All"){
   const r=await db.prepare("INSERT INTO announcements(company_id,title,body,audience) VALUES(?,?,?,?)").run(companyId,title,body,audience);
   (async()=>{
-    const emails=(await db.prepare("SELECT DISTINCT email FROM employees WHERE company_id=? AND status='Active' AND email IS NOT NULL AND email<>''").all(companyId)).map(r=>r.email);
-    if(!emails.length)return;
+    const empMails=(await db.prepare("SELECT email FROM employees WHERE company_id=? AND status='Active' AND email IS NOT NULL AND email<>''").all(companyId)).map(r=>r.email);
+    const teamAll=await roleEmails(companyId,["HR Admin","Director","Manager","Finance"]);
+    let to;
+    if(audience==="HR")to=await roleEmails(companyId,["HR Admin"]);
+    else if(audience==="Managers")to=await roleEmails(companyId,["Manager","Director"]);
+    else if(audience==="Employees")to=empMails;
+    else to=[...empMails,...teamAll];
+    to=[...new Set(to.map(e=>String(e).trim()).filter(Boolean))];
+    if(!to.length)return;
     const sender=await companySender(companyId);
-    const html=layout(title,`<p>${esc(body||"").replace(/\n/g,"<br>")}</p><p style="font-size:12px;color:#64748b">Audience: ${esc(audience)}</p>`);
-    for(const email of emails) await sendMail(email,`Announcement: ${title}`,html,sender);
+    const html=layout(title,`<p>${esc(body||"").replace(/\n/g,"<br>")}</p><p style="font-size:12px;color:#64748b">Sent to: ${esc(audience==="All"?"everyone":audience)}</p>`);
+    for(const email of to) await sendMail(email,`Announcement: ${title}`,html,sender);
   })().catch(e=>console.error("Announcement email batch failed:",e.message));
   return r.lastInsertRowid;
 }
@@ -2148,31 +2450,9 @@ app.get("/api/awards",auth,requireCompany,wrap(async(req,res)=>{
   res.json(await db.prepare("SELECT a.*,e.name,e.employee_code,e.department FROM awards a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY a.period DESC LIMIT 24").all(req.user.company_id));
 }));
 
-app.get("/api/tickets",auth,requireCompany,wrap(async(req,res)=>{
-  let q=`SELECT t.*,e.name employee_name,e.employee_code FROM tickets t JOIN employees e ON e.id=t.employee_id WHERE t.company_id=?`;let p=[req.user.company_id];
-  if(req.user.role==="Employee"){q+=" AND t.employee_id=?";p.push(req.user.employee_id)}q+=" ORDER BY t.id DESC";res.json(await db.prepare(q).all(...p));
-}));
-app.post("/api/tickets",auth,requireCompany,wrap(async(req,res)=>{
-  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
-  const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
-  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const x=req.body;const r=await db.prepare("INSERT INTO tickets(company_id,employee_id,subject,description,priority) VALUES(?,?,?,?,?)").run(req.user.company_id,eid,x.subject,x.description,x.priority||"Medium");res.json({id:r.lastInsertRowid});
-}));
-app.post("/api/tickets/:id/status",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>{
-  const r=await db.prepare("UPDATE tickets SET status=?,assigned_to=? WHERE id=? AND company_id=?").run(req.body.status,req.user.username,req.params.id,req.user.company_id);
-  if(r.changes===0)return res.status(404).json({error:"Ticket not found"});res.json({ok:true})
-}));
-
 app.get("/api/exits",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT x.*,e.name employee_name,e.employee_code FROM exit_requests x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?`;let p=[req.user.company_id];
   if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id)}q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
-}));
-app.post("/api/exits",auth,requireCompany,wrap(async(req,res)=>{
-  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
-  const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
-  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const x=req.body;
-  const r=await db.prepare("INSERT INTO exit_requests(company_id,employee_id,resignation_date,last_working_date,reason) VALUES(?,?,?,?,?)").run(req.user.company_id,eid,x.resignation_date,x.last_working_date,x.reason||"");res.json({id:r.lastInsertRowid});
 }));
 app.post("/api/exits/:id/status",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
@@ -2184,6 +2464,10 @@ app.post("/api/exits/:id/status",auth,requireCompany,roles("Super Admin","HR Adm
     if(ex)await db.prepare("UPDATE employees SET status='Inactive' WHERE id=? AND company_id=?").run(ex.employee_id,req.user.company_id);
   }
   await audit(req,"STATUS","EXIT",req.params.id);res.json({ok:true});
+  if(x.status){
+    const ex=await db.prepare("SELECT x.last_working_date,e.email,e.name FROM exit_requests x JOIN employees e ON e.id=x.employee_id WHERE x.id=?").get(req.params.id);
+    if(ex?.email)notifyMany(req.user.company_id,[ex.email],`Your resignation was ${String(x.status).toLowerCase()}`,`Resignation ${x.status}`,`<p>Hi ${esc2(ex.name)},</p><p>Your resignation has been <b>${esc2(x.status)}</b>. Your last working date is ${esc2(ex.last_working_date)}.</p>`).catch(()=>{});
+  }
 }));
 
 app.get("/api/biometric/devices",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM biometric_devices WHERE company_id=? ORDER BY id DESC").all(req.user.company_id))));

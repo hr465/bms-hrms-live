@@ -148,6 +148,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 .logo.hasimg{background-size:contain;background-repeat:no-repeat;background-position:center;background-color:#fff;color:transparent}
 .empav{position:relative;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-size:12px;font-weight:700;overflow:hidden;flex:none}
 .empav img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.expline{border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-top:8px}
 .onbitem{border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:8px}
 </style>
 </head>
@@ -263,14 +264,15 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="leaveBalance" class="cards" style="margin-bottom:14px"></div>
 <div class="panel"><div class="grid"><div class="field" id="leidWrap"><label>Employee (HR/Manager)</label><input id="leid" list="empDL" placeholder="Type name or code"></div>
 <div><label>Category</label><select id="lecat" onchange="onLeaveCatChange()"><option value="Leave">Leave</option><option value="WFH">Work From Home</option><option value="Permission">Permission (short leave)</option></select></div>
-<div id="letWrap"><label>Leave Type</label><select id="let"><option>CL - Casual Leave</option><option>SL - Sick Leave</option><option>PL - Privilege Leave</option><option>Unpaid Leave</option></select></div>
+<div id="letWrap"><label>Leave Type</label><select id="let"></select></div>
 <div><label>Days</label><input id="led" type="number" value="1" step="0.5"></div><div><label>From</label><input id="lef" type="date"></div><div><label>To</label><input id="letd" type="date"></div></div><textarea id="ler" placeholder="Reason"></textarea><button onclick="applyLeave()">Submit</button></div>
+<div id="leavePolicy" class="panel" style="display:none"></div>
 <div class="searchbar"><input id="leaveSearch" placeholder="Search employee / type..." oninput="renderLeaves()"></div>
 <div id="leaveTable" class="tblwrap"></div></section>
 
 <section id="payroll" class="page"><div class="pagehead"><h2>Payroll</h2></div>
 <div id="payBulkPanel" class="panel" style="display:none"><h3>Run payroll for the whole company</h3><div class="grid" style="grid-template-columns:1fr 1fr"><input id="pbMonth" type="month"><button onclick="runMonthPayroll()">Run Payroll for Month</button></div><p class="small">Auto-calculates gross, LOP (from attendance/unpaid leave), PF and ESIC for every active employee who doesn't already have payroll for that month, and emails each payslip.</p></div>
-<div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code" onchange="autoCalcPayroll()"></div><div><label>Month</label><input id="pem" type="month" onchange="autoCalcPayroll()"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Deductions (other)</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>LOP Days</label><input id="peld" type="number" readonly style="background:#f1f5f9"></div><div><label>PF (Employee)</label><input id="pepf" type="number"></div><div><label>ESIC (Employee)</label><input id="pees" type="number"></div><div><label>TDS</label><input id="petds" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div></div><div class="actions"><button class="outline" onclick="autoCalcPayroll()">Auto-Calculate</button><button onclick="savePayroll()">Process Payroll</button></div></div>
+<div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code" onchange="autoCalcPayroll()"></div><div><label>Month</label><input id="pem" type="month" onchange="autoCalcPayroll()"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Other deductions (manual)</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>LOP Days</label><input id="peld" type="number" readonly style="background:#f1f5f9"></div><div><label>PF (Employee)</label><input id="pepf" type="number"></div><div><label>ESIC (Employee)</label><input id="pees" type="number"></div><div><label>TDS</label><input id="petds" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div><div><label>Other earnings (manual)</label><input id="pex" type="number"></div><div><label>Other earnings label</label><input id="pexl" placeholder="e.g. Bonus, Incentive"></div><div><label>Other deductions label</label><input id="pedl" placeholder="e.g. Fine, Damage"></div><div><label>Loan / advance recovery (auto)</label><input id="peloan" type="number" readonly style="background:#f1f5f9"></div></div><div class="actions"><button class="outline" onclick="autoCalcPayroll()">Auto-Calculate</button><button onclick="savePayroll()">Process Payroll</button></div></div>
 <div class="searchbar"><input id="paySearch" placeholder="Search employee / month..." oninput="renderPayroll()"></div>
 <div id="payPaidPanel" class="panel" style="display:none"><h3>Mark the whole month as paid</h3><div class="grid" style="grid-template-columns:1fr 1fr 1fr auto"><input id="ppMonth" type="month"><input id="ppUtr" placeholder="Bank UTR / reference"><input id="ppDate" type="date"><button onclick="markMonthPaid()">Mark paid and email</button></div><p class="small">Use this when one bank batch paid everyone. Every processed payslip of the month gets this UTR and the employee is emailed a payslip with the payment details. For individual UTRs use <b>Mark paid</b> on each row.</p></div>
 <div id="payTable" class="tblwrap"></div></section>
@@ -333,8 +335,17 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="searchbar"><input id="assetSearch" placeholder="Search asset / employee..." oninput="renderAssets()"></div>
 <div id="assetTable" class="tblwrap"></div></section>
 
-<section id="expenses" class="page"><div class="pagehead"><h2>Expenses / Reimbursement</h2></div><div id="expForm" class="panel"><div class="grid"><div class="field" id="exeiWrap"><label>Employee (HR/Finance/Manager)</label><input id="exei" list="empDL" placeholder="Type name or code"></div><input id="excat" placeholder="Category"><input id="examt" type="number" placeholder="Amount"><input id="exdate" type="date"></div><textarea id="exdesc" placeholder="Description"></textarea><button onclick="addExpense()">Submit Claim</button></div>
-<div class="searchbar"><input id="expSearch" placeholder="Search employee / category..." oninput="renderExpenses()"></div>
+<section id="loans" class="page"><div class="pagehead"><div><h2>Loans &amp; Advances</h2><div class="desc">Request a salary advance or a loan. Approved amounts are recovered in monthly instalments through payroll.</div></div></div>
+<div id="loanForm" class="panel" style="display:none"><div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div class="field"><label>Type</label><select id="lnKind" onchange="onLoanKind()"><option>Salary Advance</option><option>Loan</option></select></div><div class="field"><label>Amount (Rs.)</label><input id="lnAmt" type="number" min="1"></div><div class="field" id="lnMonthsWrap"><label>Instalments (months)</label><input id="lnMonths" type="number" min="1" max="36" value="3"></div></div><div class="field"><label>Reason</label><textarea id="lnReason" placeholder="Why do you need it?"></textarea></div><button onclick="submitLoan()">Send request</button></div>
+<div id="loanTable" class="tblwrap"></div></section>
+
+<section id="expenses" class="page"><div class="pagehead"><div><h2>Expenses / Reimbursement</h2><div class="desc">Claim expenses with their bills, add several items in one go, or request a tour advance.</div></div></div>
+<div id="expForm" class="panel"><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field" id="exeiWrap"><label>Employee (HR/Finance/Manager)</label><input id="exei" list="empDL" placeholder="Type name or code"></div><div class="field"><label>Type</label><select id="exkind" onchange="onExpKind()"><option value="Reimbursement">Expense reimbursement</option><option value="Tour Advance">Tour advance</option></select></div></div>
+<datalist id="expCats"><option>Travel</option><option>Food</option><option>Accommodation</option><option>Fuel</option><option>Stationery</option><option>Communication</option><option>Client meeting</option><option>Other</option></datalist>
+<div id="expLines"></div>
+<div class="actions" style="margin-top:8px"><button type="button" class="gray" id="expAddLine" onclick="addExpLine()">+ Add another item</button><button onclick="submitExpenses()">Submit</button></div>
+<p class="small" style="margin-top:6px">Attach the bill for each item (PDF, JPG or PNG, up to 5 MB).</p></div>
+<div class="searchbar"><input id="expSearch" placeholder="Search employee / category / reference..." oninput="renderExpenses()"></div>
 <div id="expenseTable" class="tblwrap"></div></section>
 
 <section id="documents" class="page"><div class="pagehead"><h2>Employee Documents</h2></div><div class="panel"><div class="grid"><div class="field" id="doeiWrap"><label>Employee (HR only)</label><input id="doei" list="empDL" placeholder="Type name or code"></div><input id="don" placeholder="Document Name"><input id="dot" placeholder="Document Type"><input id="dox" type="date" placeholder="Expiry"></div><div class="field"><label>File (optional, max ~10MB)</label><input id="dofile" type="file"></div><button onclick="addDocument()">Add Document</button></div><div id="docTable" class="tblwrap"></div></section>
@@ -348,7 +359,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="searchbar"><input id="tickSearch" placeholder="Search employee / subject..." oninput="renderTickets()"></div>
 <div id="ticketTable" class="tblwrap"></div></section>
 
-<section id="exits" class="page"><div class="pagehead"><h2>Exit / Separation</h2></div><div class="panel"><div class="grid"><div class="field" id="xeiWrap"><label>Employee</label><input id="xei" list="empDL" placeholder="Type name or code"></div><input id="xrd" type="date"><input id="xlwd" type="date"></div><textarea id="xr" placeholder="Reason"></textarea><button onclick="createExit()">Submit Resignation</button></div><div id="exitTable" class="tblwrap"></div></section>
+<section id="exits" class="page"><div class="pagehead"><h2>Exit / Separation</h2></div><div class="panel" id="exitForm" style="display:none"><h3>Submit your resignation</h3><div class="grid"><div class="field"><label>Resignation date</label><input id="xrd" type="date"></div><div class="field"><label>Last working date</label><input id="xlwd" type="date"></div></div><textarea id="xr" placeholder="Reason"></textarea><button onclick="createExit()">Submit Resignation</button></div><div id="exitTable" class="tblwrap"></div></section>
 
 <section id="biometric" class="page"><div class="pagehead"><div><h2>Biometric Devices</h2><div class="desc">Connect eSSL / ZKTeco devices so attendance flows into the portal automatically.</div></div></div>
 <div class="notice"><b>ADMS push (recommended):</b> the device sends attendance to this portal over the internet by itself. It works from any city and needs no computer at the device's office. <b>LAN pull:</b> for devices without ADMS; a small sync agent on a PC at the device's office uploads the data. In both cases each employee's <b>Biometric ID</b> must match the ID enrolled on the device.</div>
@@ -458,6 +469,8 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Payment date</label><input id="mpDate" type="date"></div><div class="field"><label>Mode</label><select id="mpMode"><option>NEFT</option><option>IMPS</option><option>RTGS</option><option>UPI</option><option>Cheque</option><option>Cash</option></select></div></div>
 <div id="mpErr" class="err"></div><div class="actions" style="margin-top:12px"><button onclick="saveMarkPaid()">Mark paid and email</button><button class="gray" onclick="$('markPaidModal').classList.remove('show')">Cancel</button></div></div></div>
 
+<div class="modalbg" id="reasonModal"><div class="modal" style="max-width:460px"><h3 id="reasonTitle">Reason</h3><textarea id="reasonText" placeholder="Write the reason" style="min-height:90px"></textarea><div id="reasonErr" class="err"></div><div class="actions" style="margin-top:12px"><button id="reasonOk" class="red">Confirm</button><button class="gray" id="reasonCancel">Cancel</button></div></div></div>
+<div class="modalbg" id="loanDecModal"><div class="modal" style="max-width:460px"><h3>Approve request</h3><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Instalments (months)</label><input id="ldMonths" type="number" min="1" max="36"></div><div class="field"><label>Deduction starts</label><input id="ldStart" type="month"></div></div><div class="field"><label>Note for the employee (optional)</label><input id="ldNote"></div><div id="ldErr" class="err"></div><div class="actions" style="margin-top:12px"><button onclick="confirmLoanApprove()">Approve</button><button class="gray" onclick="$('loanDecModal').classList.remove('show')">Cancel</button></div></div></div>
 <div class="modalbg" id="editCompModal"><div class="modal" style="max-width:560px">
 <h3>Edit company</h3>
 <div class="field"><label>Company name</label><input id="ecName"></div>
@@ -617,6 +630,7 @@ const ICONS={
  onboarding:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l4-4m-4 4l-4-4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>',
  performance:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21V10M10 21V3M17 21v-7"/></svg>',
  assets:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+ loans:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>',
  expenses:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9M9.3 15c.4 1 1.4 1.6 2.7 1.6 1.7 0 2.8-.8 2.8-2s-1-1.7-2.8-2c-1.7-.3-2.7-.9-2.7-2s1.1-2 2.7-2c1.3 0 2.3.5 2.7 1.5"/></svg>',
  documents:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M9.5 13h5M9.5 16.5h5"/></svg>',
  announcements:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10v4h3l5 4V6L7 10H4Z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>',
@@ -634,9 +648,9 @@ function navBuild(){
  sections.push({t:"Overview",items:[["dashboard","Dashboard",true],["mis","MIS Reports",["Super Admin","HR Admin","Director","Finance"].includes(r)],["overtime","Overtime Report",["Super Admin","HR Admin","Director","Finance","Manager"].includes(r)]]});
  sections.push({t:"Organization",items:[["employees","Employees",true]]});
  sections.push({t:"Time & Leave",items:[["attendance","Attendance",true],["leave","Leave",true]]});
- sections.push({t:"Payroll & Finance",items:[["payroll","Payroll",["Super Admin","HR Admin","Finance","Manager"].includes(r)],["expenses","Expenses",true]]});
+ sections.push({t:"Payroll & Finance",items:[["payroll","Payroll",["Super Admin","HR Admin","Finance","Manager"].includes(r)],["loans","Loans & Advances",true],["expenses","Expenses",true]]});
  sections.push({t:"Talent",items:[["recruitment","Recruitment",["Super Admin","HR Admin","Manager"].includes(r)],["onboarding","Onboarding",["Super Admin","HR Admin","Employee"].includes(r)],["agreements","Agreements",true],["performance","Performance",true],["increments","Increments",["Super Admin","HR Admin","Director"].includes(r)],["recognition","Recognition",true],["letters","Letters",true]]});
- sections.push({t:"Assets & Docs",items:[["assets","Assets",["Super Admin","HR Admin"].includes(r)],["documents","Documents",true]]});
+ sections.push({t:"Assets & Docs",items:[["assets",r==="Employee"?"My Assets":"Assets",["Super Admin","HR Admin","Employee"].includes(r)],["documents","Documents",true]]});
  sections.push({t:"Engagement",items:[["calendar","Calendar",true],["announcements","Announcements",true],["tickets","HR Helpdesk",true],["exits","Exit / Separation",true]]});
  sections.push({t:"Administration",items:[["team","Team",["Super Admin","HR Admin"].includes(r)],["biometric","Biometric / eSSL",["Super Admin","HR Admin"].includes(r)],["audit","Audit Log",["Super Admin","HR Admin"].includes(r)],["settings","HR Policies",["Super Admin","HR Admin"].includes(r)]]});
  $("nav").innerHTML=sections.map(s=>{
@@ -769,12 +783,13 @@ async function loadPage(id){
   if(id==="increments"){await loadIncrements();}
   if(id==="recognition"){await loadRecognition();}
   if(id==="letters"){await loadLetters();}
-  if(id==="assets"){PAGEDATA.assets=await api("/api/assets");renderAssets();}
+  if(id==="assets"){PAGEDATA.assets=await api("/api/assets");renderAssets();const h=document.querySelector("#assets .pagehead h2");if(h)h.textContent=ME.role==="Employee"?"My Assets":"Asset Management";}
   if(id==="expenses"){PAGEDATA.expenses=await api("/api/expenses");renderExpenses();}
+  if(id==="loans"){await loadLoans();}
   if(id==="documents"){let x=await api("/api/documents");table("docTable",["Employee","Document","Type","Expiry","Status","File"],x.map(a=>[a.employee_code+" - "+a.employee_name,esc(a.name),esc(a.doc_type),a.expiry_date,statusBadge(a.status),a.file_name?`<a href="/api/documents/${a.id}/file" target="_blank">${esc(a.file_name)}</a>`:"-"]));}
   if(id==="announcements"){PAGEDATA.announcements=await api("/api/announcements");table("annTable",["Title","Body","Audience","Created"],PAGEDATA.announcements.map(a=>[esc(a.title),esc(a.body),a.audience,a.created_at]));}
   if(id==="tickets"){PAGEDATA.tickets=await api("/api/tickets");renderTickets();}
-  if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();}
+  if(id==="exits"){PAGEDATA.exits=await api("/api/exits");renderExits();if($("exitForm"))$("exitForm").style.display=ME.role==="Employee"?"block":"none";}
   if(id==="biometric"){let x=await api("/api/biometric/devices");renderBiometric(x);loadUnregistered();if(!$("editDeviceId").value)onBioModeChange();}
   if(id==="audit"){PAGEDATA.audit=await api("/api/audit");renderAudit();}
   if(id==="settings"){loadEmailLog();loadLetterhead();loadWorkTiming();loadCompanyProfile();loadEmailSettings();loadPolicyText();}
@@ -803,6 +818,15 @@ function pickImage(maxDim,cb){
     img.src=u;
   };
   i.click();
+}
+function askReason(title,okText){
+  return new Promise(res=>{
+    $("reasonTitle").textContent=title;$("reasonText").value="";$("reasonErr").textContent="";$("reasonOk").textContent=okText||"Confirm";
+    $("reasonModal").classList.add("show");setTimeout(()=>$("reasonText").focus(),50);
+    const done=v=>{$("reasonModal").classList.remove("show");res(v)};
+    $("reasonOk").onclick=()=>{const v=$("reasonText").value.trim();if(!v){$("reasonErr").textContent="Please write a reason.";return}done(v)};
+    $("reasonCancel").onclick=()=>done(null);
+  });
 }
 function setLogoUrl(el,url,fallback){
   el.textContent=fallback;el.classList.remove("hasimg");el.style.backgroundImage="";
@@ -1031,14 +1055,44 @@ function renderAttendance(){
 }
 
 /* ---------- Leave ---------- */
+let LEAVE_TYPES=[];
+async function loadLeaveTypes(){
+  try{LEAVE_TYPES=await api("/api/leave-types");const sel=$("let");if(sel)sel.innerHTML=LEAVE_TYPES.map(t=>`<option>${esc(t.name)}</option>`).join("")}catch(e){}
+}
 async function loadLeaveBalance(){
   if(!COMPANY)return;
+  await loadLeaveTypes();
+  if(isHR())renderLeavePolicy();
   const eid=isMgrPlus()?null:ME.employee_id;
   if(!eid && isMgrPlus()){$("leaveBalance").innerHTML=`<div class="small">Select an employee above to view balance after applying, or check Employees page.</div>`;return}
   try{
     const b=await api("/api/leaves/balance");
-    $("leaveBalance").innerHTML=b.map(x=>`<div class="card"><div class="bar"></div><div class="lbl">${esc(x.leave_type)}</div><div class="num">${x.remaining}</div><div class="small">of ${x.annual_balance} (used ${x.used})</div></div>`).join("");
+    $("leaveBalance").innerHTML=b.map(x=>`<div class="card"><div class="bar"></div><div class="lbl">${esc(x.leave_type)}${x.custom?' <span class="chip">Personal</span>':""}</div><div class="num">${x.eligible?x.remaining:"-"}</div><div class="small">${x.eligible?`of ${x.annual_balance} (used ${x.used})`:`Available from ${new Date(x.available_from).toLocaleDateString("en-IN")} (${x.eligible_after_months} month(s) after joining)`}</div></div>`).join("");
   }catch(e){}
+}
+async function renderLeavePolicy(){
+  const box=$("leavePolicy");if(!box)return;box.style.display="block";
+  try{
+    const [types,allot]=await Promise.all([api("/api/leave-types"),api("/api/leave-allotments")]);
+    box.innerHTML=`<h3>Leave policy</h3><p class="small" style="margin-bottom:8px">Set how many days each leave type gives per year, and after how many months from the joining date an employee can use it (0 means from day one). Use the last section to give one employee a different number of days.</p>
+    <div class="tblwrap"><table><thead><tr><th>Leave type</th><th>Days per year</th><th>Applicable after (months)</th><th></th></tr></thead><tbody>`+
+    types.map(t=>`<tr><td><input id="lt_n_${t.id}" value="${esc(t.name)}"></td><td><input id="lt_d_${t.id}" type="number" min="0" max="365" step="0.5" value="${t.annual_balance}" style="width:90px"></td><td><input id="lt_m_${t.id}" type="number" min="0" max="60" value="${t.eligible_after_months}" style="width:90px"></td><td><div class="actions"><button class="sm" onclick="saveLeaveType(${t.id})">Save</button><button class="sm red" onclick="deleteLeaveType(${t.id})">Delete</button></div></td></tr>`).join("")+
+    `<tr><td><input id="lt_n_0" placeholder="New leave type, e.g. EL - Earned Leave"></td><td><input id="lt_d_0" type="number" min="0" max="365" step="0.5" value="0" style="width:90px"></td><td><input id="lt_m_0" type="number" min="0" max="60" value="0" style="width:90px"></td><td><button class="sm" onclick="saveLeaveType(0)">Add</button></td></tr></tbody></table></div>
+    <h3 style="margin-top:18px">Give one employee a different allotment</h3><div class="grid" style="grid-template-columns:2fr 2fr 1fr auto"><input id="laEmp" list="empDL" placeholder="Employee name or code"><select id="laType">${types.map(t=>`<option>${esc(t.name)}</option>`).join("")}</select><input id="laDays" type="number" step="0.5" min="0" placeholder="Days"><button onclick="saveAllotment()">Set</button></div><p class="small">Leave the days empty and press Set to remove a personal allotment.</p>`+
+    (allot.length?`<div class="tblwrap" style="margin-top:8px"><table><thead><tr><th>Employee</th><th>Leave type</th><th>Days</th></tr></thead><tbody>${allot.map(a=>`<tr><td>${esc(a.employee_code+" - "+a.name)}</td><td>${esc(a.leave_type)}</td><td>${a.days}</td></tr>`).join("")}</tbody></table></div>`:"");
+  }catch(e){}
+}
+async function saveLeaveType(id){
+  const body={name:$("lt_n_"+id).value,annual_balance:$("lt_d_"+id).value,eligible_after_months:$("lt_m_"+id).value};if(id)body.id=id;
+  try{await api("/api/leave-types",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await uiAlert("The leave policy has been saved.","ok");loadPage("leave")}catch(e){uiAlert(e.message)}
+}
+async function deleteLeaveType(id){
+  if(!await uiConfirm("Delete this leave type?",{danger:true,okText:"Delete"}))return;
+  try{await api("/api/leave-types/"+id,{method:"DELETE"});loadPage("leave")}catch(e){uiAlert(e.message)}
+}
+async function saveAllotment(){
+  const eid=resolveEmp("laEmp");if(!eid)return uiAlert("Please select a valid employee from the list.");
+  try{await api("/api/leave-allotments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type:$("laType").value,days:$("laDays").value})});await uiAlert("The allotment has been saved.","ok");loadPage("leave")}catch(e){uiAlert(e.message)}
 }
 function onLeaveCatChange(){$("letWrap").style.display=$("lecat").value==="Leave"?"":"none"}
 async function applyLeave(){
@@ -1049,13 +1103,15 @@ async function applyLeave(){
   try{await api("/api/leaves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type,category,days:$("led").value,from_date:$("lef").value,to_date:$("letd").value,reason:$("ler").value})});alert("Your request has been submitted.");$("leid").value="";loadPage("leave")}catch(e){alert(e.message)}
 }
 async function leaveStatus(id,status){
-  try{await api(`/api/leaves/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("leave")}catch(e){alert(e.message)}
+  let reason="";
+  if(status==="Rejected"){reason=await askReason("Why is this request being rejected?","Reject");if(reason===null)return}
+  try{await api(`/api/leaves/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reason})});loadPage("leave")}catch(e){alert(e.message)}
 }
 function renderLeaves(){
   if(needsCompany("leaveTable"))return;
   const q=$("leaveSearch").value;
   const rows=filterRows((PAGEDATA.leave||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.name})),["emplbl","leave_type"],q);
-  table("leaveTable",["Employee","Category","Type","From","To","Days","Status","Approved By","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.name),a.category&&a.category!=="Leave"?`<span class="chip">${esc(a.category)}</span>`:"Leave",a.leave_type&&a.category==="Leave"?a.leave_type:"-",a.from_date,a.to_date,a.days,statusBadge(a.status),a.approved_by||"-",
+  table("leaveTable",["Employee","Category","Type","From","To","Days","Status","Decided by","Reason","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.name),a.category&&a.category!=="Leave"?`<span class="chip">${esc(a.category)}</span>`:"Leave",a.leave_type&&a.category==="Leave"?esc(a.leave_type):"-",a.from_date,a.to_date,a.days,statusBadge(a.status),esc(a.approved_by||"-"),a.decision_reason?esc(a.decision_reason):"-",
     (isMgrPlus() && a.status==="Pending")?`<div class="actions"><button class="sm green" onclick="leaveStatus(${a.id},'Approved')">Approve</button><button class="sm red" onclick="leaveStatus(${a.id},'Rejected')">Reject</button></div>`:""]));
 }
 
@@ -1065,12 +1121,12 @@ async function autoCalcPayroll(){
   if(!eid||!month)return;
   try{
     const c=await api(`/api/payroll/calculate?employee_id=${eid}&month=${month}`);
-    $("peg").value=c.gross;$("pel").value=c.lop;$("peld").value=c.lopDays;$("pepf").value=c.pfEmployee;$("pees").value=c.esicEmployee;
+    $("peg").value=c.gross;$("pel").value=c.lop;$("peld").value=c.lopDays;$("pepf").value=c.pfEmployee;$("pees").value=c.esicEmployee;$("peloan").value=c.loanDeduction||0;
   }catch(e){alert(e.message)}
 }
 async function savePayroll(){
   const eid=resolveEmp("pei");if(!eid)return alert("Please select a valid employee from the list.");
-  try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,pf_employee:$("pepf").value,esic_employee:$("pees").value,tds:$("petds").value,ot:$("peo").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
+  try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,pf_employee:$("pepf").value,esic_employee:$("pees").value,tds:$("petds").value,ot:$("peo").value,other_earnings:$("pex").value,other_earn_label:$("pexl").value,ded_label:$("pedl").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
 }
 async function runMonthPayroll(){
   const month=$("pbMonth").value;if(!month)return alert("Please select a month.");
@@ -1082,12 +1138,14 @@ function printPayslip(row){
   <table><tr><th>Employee</th><td>${esc(row.employee_code)} - ${esc(row.name)}</td></tr>
   <tr><th>Payslip No</th><td>${esc(row.payslip_no)}</td></tr>
   <tr><th>Gross</th><td>₹${Number(row.gross).toLocaleString("en-IN")}</td></tr>
-  <tr><th>Deductions</th><td>₹${Number(row.deductions).toLocaleString("en-IN")}</td></tr>
+  <tr><th>Other deductions${row.ded_label?" ("+esc(row.ded_label)+")":""}</th><td>₹${Number(row.deductions).toLocaleString("en-IN")}</td></tr>
   <tr><th>LOP (${row.lop_days||0} day(s))</th><td>₹${Number(row.lop).toLocaleString("en-IN")}</td></tr>
   <tr><th>PF (Employee)</th><td>₹${Number(row.pf_employee||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>ESIC (Employee)</th><td>₹${Number(row.esic_employee||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>TDS</th><td>₹${Number(row.tds||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>Overtime</th><td>₹${Number(row.ot).toLocaleString("en-IN")}</td></tr>
+  <tr><th>Other earnings${row.other_earn_label?" ("+esc(row.other_earn_label)+")":""}</th><td>₹${Number(row.other_earnings||0).toLocaleString("en-IN")}</td></tr>
+  <tr><th>Loan / advance recovery</th><td>₹${Number(row.loan_deduction||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>Net Pay</th><td><b>₹${Number(row.net).toLocaleString("en-IN")}</b></td></tr>
   <tr><th>Status</th><td>${esc(row.status)}</td></tr></table>`;
   document.body.classList.add("printing");
@@ -1433,19 +1491,97 @@ function renderAssets(){
   table("assetTable",["Code","Asset","Category","Serial","Status","Employee"],rows.map(a=>[esc(a.asset_code),esc(a.name),esc(a.category),esc(a.serial_no),statusBadge(a.status),esc(a.employee_name||"-")]));
 }
 
+/* ---------- Loans and advances ---------- */
+let LOAN_DEC=null;
+function onLoanKind(){$("lnMonthsWrap").style.display=$("lnKind").value==="Loan"?"":"none"}
+async function loadLoans(){
+  const own=["Employee","Manager"].includes(ME.role);
+  $("loanForm").style.display=own?"block":"none";onLoanKind();
+  const rows=await api("/api/loans");PAGEDATA.loans=rows;
+  const dec=["Super Admin","HR Admin","Finance"].includes(ME.role);
+  table("loanTable",["Employee","Type","Amount","Instalments","Monthly deduction","Balance","Status","Reason / note","Action"],rows.map(l=>[esc(l.employee_code+" - "+l.employee_name),esc(l.kind),"₹"+Number(l.amount).toLocaleString("en-IN"),l.months,l.status==="Pending"?"-":"₹"+Number(l.emi).toLocaleString("en-IN"),
+    ["Approved","Closed"].includes(l.status)?"₹"+Number(l.balance).toLocaleString("en-IN"):"-",statusBadge(l.status)+(l.status==="Approved"&&l.start_month?`<div class="small">from ${esc(l.start_month)}</div>`:""),
+    esc(l.decision_note||l.reason||"-"),
+    dec&&l.status==="Pending"?`<div class="actions"><button class="sm green" onclick="openLoanApprove(${l.id})">Approve</button><button class="sm red" onclick="rejectLoan(${l.id})">Reject</button></div>`
+      :(own&&l.status==="Pending"&&l.employee_id===ME.employee_id?`<button class="sm gray" onclick="cancelLoan(${l.id})">Cancel</button>`
+      :(dec&&l.status==="Approved"&&!l.disbursed_on?`<button class="sm outline" onclick="disburseLoan(${l.id})">Mark paid out</button>`:(l.disbursed_on?`<span class="small">Paid out ${esc(l.disbursed_on)}</span>`:"")))]));
+}
+async function submitLoan(){
+  try{
+    await api("/api/loans",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind:$("lnKind").value,amount:$("lnAmt").value,months:$("lnMonths").value,reason:$("lnReason").value})});
+    await uiAlert("Your request has been sent to HR and Finance.","ok");$("lnAmt").value="";$("lnReason").value="";loadLoans();
+  }catch(e){uiAlert(e.message)}
+}
+function openLoanApprove(id){
+  LOAN_DEC=(PAGEDATA.loans||[]).find(x=>x.id===id);if(!LOAN_DEC)return;
+  $("ldMonths").value=LOAN_DEC.months;$("ldStart").value=new Date().toISOString().slice(0,7);$("ldNote").value="";$("ldErr").textContent="";$("loanDecModal").classList.add("show");
+}
+async function confirmLoanApprove(){
+  try{await api(`/api/loans/${LOAN_DEC.id}/decision`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"approve",months:$("ldMonths").value,start_month:$("ldStart").value,note:$("ldNote").value})});$("loanDecModal").classList.remove("show");loadLoans()}catch(e){$("ldErr").textContent=e.message}
+}
+async function rejectLoan(id){
+  const note=await askReason("Why is this request being rejected?","Reject");if(note===null)return;
+  try{await api(`/api/loans/${id}/decision`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"reject",note})});loadLoans()}catch(e){uiAlert(e.message)}
+}
+async function cancelLoan(id){
+  if(!await uiConfirm("Cancel this request?",{okText:"Cancel request"}))return;
+  try{await api(`/api/loans/${id}/cancel`,{method:"POST"});loadLoans()}catch(e){uiAlert(e.message)}
+}
+async function disburseLoan(id){
+  try{await api(`/api/loans/${id}/disburse`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});loadLoans()}catch(e){uiAlert(e.message)}
+}
+
 /* ---------- Expenses ---------- */
-async function addExpense(){
+function onExpKind(){$("expLines").innerHTML="";addExpLine();$("expAddLine").style.display=$("exkind").value==="Reimbursement"?"":"none"}
+function addExpLine(){
+  const tour=$("exkind").value==="Tour Advance",d=document.createElement("div");d.className="expline";
+  d.innerHTML=tour
+    ?`<div class="grid" style="grid-template-columns:2fr 1fr 1fr 1fr"><input class="x-place" placeholder="Destination"><input class="x-date" type="date" title="Tour from"><input class="x-to" type="date" title="Tour to"><input class="x-amt" type="number" placeholder="Advance amount"></div><textarea class="x-desc" placeholder="Purpose of the tour"></textarea>`
+    :`<div class="grid" style="grid-template-columns:1.2fr 1fr 1fr 2fr"><input class="x-cat" list="expCats" placeholder="Category"><input class="x-amt" type="number" placeholder="Amount"><input class="x-date" type="date"><input class="x-desc" placeholder="Description"></div><div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span class="small">Bill</span><input class="x-file" type="file" accept="image/*,application/pdf" style="width:auto"><button type="button" class="sm red" onclick="removeExpLine(this)">Remove</button></div>`;
+  $("expLines").appendChild(d);
+}
+function removeExpLine(b){if(document.querySelectorAll("#expLines .expline").length>1)b.closest(".expline").remove()}
+async function submitExpenses(){
   const eid=isMgrPlus()?resolveEmp("exei"):ME.employee_id;
   if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
-  try{await api("/api/expenses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,category:$("excat").value,amount:$("examt").value,expense_date:$("exdate").value,description:$("exdesc").value})});alert("Claim submitted");$("exei").value="";loadPage("expenses")}catch(e){alert(e.message)}
+  const kind=$("exkind").value,items=[];
+  for(const d of document.querySelectorAll("#expLines .expline")){
+    const it={amount:d.querySelector(".x-amt").value,expense_date:d.querySelector(".x-date").value,description:d.querySelector(".x-desc").value};
+    if(kind==="Tour Advance"){it.tour_place=d.querySelector(".x-place").value;it.tour_to=d.querySelector(".x-to").value}
+    else{
+      it.category=d.querySelector(".x-cat").value;
+      const f=d.querySelector(".x-file").files[0];
+      if(f){
+        if(f.size>5*1024*1024)return alert("A bill is too large (maximum 5 MB).");
+        it.bill={name:f.name,mime:f.type,base64:await readFileAsBase64(f)};
+      }
+    }
+    items.push(it);
+  }
+  try{
+    const r=await api("/api/expenses/batch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,kind,items})});
+    await uiAlert(`Submitted. Reference ${r.claim_ref}, ${r.lines} item(s), total Rs. ${Number(r.total).toLocaleString("en-IN")}.`,"ok");
+    $("exei").value="";onExpKind();loadPage("expenses");
+  }catch(e){alert(e.message)}
 }
-async function expenseStatus(id,status){try{await api(`/api/expenses/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("expenses")}catch(e){alert(e.message)}}
+async function expenseStatus(id,status){
+  let reason="";
+  if(status==="Rejected"){reason=await askReason("Why is this being rejected?","Reject");if(reason===null)return}
+  try{await api(`/api/expenses/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reason})});loadPage("expenses")}catch(e){alert(e.message)}
+}
 function renderExpenses(){
   if(needsCompany("expenseTable"))return;
+  if(!$("expLines").children.length)onExpKind();
   const q=$("expSearch").value;
-  const rows=filterRows((PAGEDATA.expenses||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.employee_name})),["emplbl","category"],q);
-  table("expenseTable",["Employee","Category","Amount","Date","Description","Status","Action"],rows.map(a=>[esc(a.employee_code+" - "+a.employee_name),esc(a.category),"₹"+Number(a.amount).toLocaleString("en-IN"),a.expense_date,esc(a.description),statusBadge(a.status),
-    (isFinancePlus()||ME.role==="Manager")&&a.status==="Pending"?`<div class="actions"><button class="sm green" onclick="expenseStatus(${a.id},'Approved')">Approve</button><button class="sm red" onclick="expenseStatus(${a.id},'Rejected')">Reject</button></div>`:""]));
+  const rows=filterRows((PAGEDATA.expenses||[]).map(a=>({...a,emplbl:a.employee_code+" "+a.employee_name})),["emplbl","category","claim_ref"],q);
+  const canAct=isFinancePlus()||ME.role==="Manager";
+  table("expenseTable",["Reference","Employee","Type","Category","Amount","Date","Details","Bill","Status","Action"],rows.map(a=>[esc(a.claim_ref||"-"),esc(a.employee_code+" - "+a.employee_name),esc(a.kind||"Reimbursement"),esc(a.category),"₹"+Number(a.amount).toLocaleString("en-IN"),
+    a.kind==="Tour Advance"?`${esc(a.expense_date)} to ${esc(a.tour_to||"")}`:esc(a.expense_date),
+    a.kind==="Tour Advance"?esc((a.tour_place||"")+(a.description?" — "+a.description:"")):esc(a.description),
+    a.has_bill?`<a href="/api/expenses/${a.id}/bill" target="_blank" rel="noopener">View</a>`:"-",
+    statusBadge(a.status)+(a.reject_reason?`<div class="small">${esc(a.reject_reason)}</div>`:""),
+    canAct&&a.status==="Pending"?`<div class="actions"><button class="sm green" onclick="expenseStatus(${a.id},'Approved')">Approve</button><button class="sm red" onclick="expenseStatus(${a.id},'Rejected')">Reject</button></div>`
+      :(isFinancePlus()&&a.status==="Approved"?`<button class="sm outline" onclick="expenseStatus(${a.id},'Paid')">Mark paid</button>`:"")]));
 }
 
 /* ---------- Documents ---------- */
@@ -1491,9 +1627,8 @@ function renderTickets(){
 
 /* ---------- Exits ---------- */
 async function createExit(){
-  const eid=isHR()?resolveEmp("xei"):ME.employee_id;
-  if(isHR() && !eid)return alert("Please select a valid employee from the list.");
-  try{await api("/api/exits",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,resignation_date:$("xrd").value,last_working_date:$("xlwd").value,reason:$("xr").value})});alert("Exit request submitted");$("xei").value="";loadPage("exits")}catch(e){alert(e.message)}
+  if(ME.role!=="Employee")return alert("Only the employee can submit a resignation.");
+  try{await api("/api/exits",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resignation_date:$("xrd").value,last_working_date:$("xlwd").value,reason:$("xr").value})});alert("Your resignation has been submitted. HR has been informed.");loadPage("exits")}catch(e){alert(e.message)}
 }
 async function exitAction(id,field,value){try{await api(`/api/exits/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({[field]:value})});loadPage("exits")}catch(e){alert(e.message)}}
 function renderExits(){
