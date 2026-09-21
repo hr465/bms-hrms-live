@@ -424,6 +424,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="field"><label>Sender Gmail</label><input id="cmSmtpUser" placeholder="companyhr@gmail.com"></div>
 <div class="field"><label>App Password</label><input id="cmSmtpPass" type="password" placeholder="16-char app password"></div>
 </div>
+<label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="cmSendPw" checked> Email the login details, including the password, to the contact email</label>
 <div id="compErr" class="err"></div>
 <div class="actions"><button onclick="submitCompany()">Onboard Company</button><button class="gray" onclick="$('compModal').classList.remove('show')">Cancel</button></div>
 </div></div>
@@ -437,6 +438,10 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="field" style="margin-top:6px"><label>Minimum hours per day</label><input id="etMin" type="number" step="0.5" min="0" max="16"></div>
 <div id="etErr" class="err"></div><div class="actions" style="margin-top:12px"><button onclick="saveEmpTiming()">Save</button><button class="gray" onclick="$('empTimingModal').classList.remove('show')">Cancel</button></div></div></div>
 
+<div class="modalbg" id="delCompModal"><div class="modal" style="max-width:480px"><h3>Delete company</h3>
+<p class="small" style="margin-bottom:10px">This permanently removes the company with all its employees, attendance, payroll, letters, agreements, documents and logins. This cannot be undone.</p>
+<div class="field"><label id="delCompLabel">Type the company name to confirm</label><input id="delCompName" autocomplete="off"></div>
+<div id="delCompErr" class="err"></div><div class="actions" style="margin-top:12px"><button class="red" onclick="confirmDeleteCompany()">Delete permanently</button><button class="gray" onclick="$('delCompModal').classList.remove('show')">Cancel</button></div></div></div>
 <div class="modalbg" id="usersModal"><div class="modal" style="max-width:600px"><h3 id="usTitle">Company logins</h3><div id="usBody" style="max-height:380px;overflow:auto"></div><div class="actions" style="margin-top:12px"><button class="gray" onclick="$('usersModal').classList.remove('show')">Close</button></div></div></div>
 
 <div class="modalbg" id="markPaidModal"><div class="modal" style="max-width:460px"><h3>Mark salary as paid</h3>
@@ -812,7 +817,7 @@ let CM_LOGO=null;
 function chooseNewLogo(){pickImage(320,d=>{CM_LOGO=d;$("cmLogoPrev").src=d;$("cmLogoPrev").style.display="block"})}
 function openCompanyModal(){CM_LOGO=null;$("cmLogoPrev").style.display="none";["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
 async function submitCompany(){
-  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,logo:CM_LOGO,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
+  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,logo:CM_LOGO,send_password:$("cmSendPw").checked,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
   try{await api("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("compModal").classList.remove("show");alert("Company onboarded successfully. Share the HR Admin credentials with the company so they can sign in and get started.");loadPage("companies");loadCompaniesCache();}
   catch(e){$("compErr").textContent=e.message}
 }
@@ -820,7 +825,7 @@ async function companyStatus(id,status){try{await api(`/api/companies/${id}/stat
 function renderCompanies(){
   const rows=PAGEDATA.companies||[];
   table("compTable",["Company","Code","Domain","Industry","Employees","Status","Onboarded","Action"],rows.map(c=>[esc(c.name),`<span class="chip">${esc(c.code)}</span>`,c.custom_domain?esc(c.custom_domain):`<span class="small">Not set</span>`,esc(c.industry||"-"),c.employee_count,statusBadge(c.status),c.created_at,
-    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">View</button><button class="sm gray" onclick="openEditCompany(${c.id})">Edit</button><button class="sm gray" onclick="openUsers(${c.id})">Logins</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">View</button><button class="sm gray" onclick="openEditCompany(${c.id})">Edit</button><button class="sm gray" onclick="openUsers(${c.id})">Logins</button><button class="sm red" onclick="openDeleteCompany(${c.id})">Delete</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
 }
 async function openUsers(id){
   const c=(PAGEDATA.companies||[]).find(x=>x.id===id);
@@ -843,6 +848,12 @@ async function loadPlatformPanel(){
 function choosePlatformLogo(){pickImage(320,async d=>{try{await api("/api/images/platform",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:d})});IMG_V=Date.now();PLATFORM.has_logo=true;applyPlatformBrand();if(!COMPANY)setLogoUrl($("hdrLogo"),platformLogoUrl(),PLATFORM.short)}catch(e){uiAlert(e.message)}})}
 async function removePlatformLogo(){try{await api("/api/images/platform",{method:"DELETE"});IMG_V=Date.now();PLATFORM.has_logo=false;applyPlatformBrand();if(!COMPANY)setLogoUrl($("hdrLogo"),null,PLATFORM.short)}catch(e){uiAlert(e.message)}}
 async function savePlatformEmail(){try{await api("/api/platform-email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:$("plEmail").value})});uiAlert("The Super Admin email has been saved.")}catch(e){uiAlert(e.message)}}
+let DEL_CO=null;
+function openDeleteCompany(id){const c=(PAGEDATA.companies||[]).find(x=>x.id===id);if(!c)return;DEL_CO=c;$("delCompLabel").textContent=`Type "${c.name}" to confirm`;$("delCompName").value="";$("delCompErr").textContent="";$("delCompModal").classList.add("show")}
+async function confirmDeleteCompany(){
+  try{await api(`/api/companies/${DEL_CO.id}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm_name:$("delCompName").value})});
+    $("delCompModal").classList.remove("show");await uiAlert("The company has been deleted.");loadPage("companies");loadCompaniesCache()}catch(e){$("delCompErr").textContent=e.message}
+}
 let EDIT_CO=null;
 function openEditCompany(id){
   const c=(PAGEDATA.companies||[]).find(x=>x.id===id);if(!c)return;

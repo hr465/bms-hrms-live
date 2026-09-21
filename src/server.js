@@ -415,14 +415,35 @@ app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
     await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email) VALUES(?,?,?,?,?)").run(companyId,x.admin_username,hash(x.admin_password,s),"HR Admin",x.contact_email||null);
     await audit(req,"ONBOARD","COMPANY",x.name);
     if(x.contact_email){
-      sendMail(x.contact_email,`Welcome to BMS HRMS — ${x.name}`,layout("Your company workspace is ready",
-        `<p>Hi,</p><p>Your company <b>${x.name}</b> has been onboarded on BMS Enterprise HRMS. You've been set up as the HR Admin.</p>
-         <p><b>Login URL:</b> ${req.protocol}://${req.get("host")}<br><b>Username:</b> ${x.admin_username}<br><b>Password:</b> (the one you set during onboarding)</p>
-         <p>Please log in and change your password from the header menu.</p>`),
-        {smtp_user:x.smtp_user,smtp_pass:x.smtp_pass,name:x.name}).catch(()=>{});
+      const brand=process.env.PLATFORM_NAME||"the HR portal";
+      const link=`${req.protocol}://${req.get("host")}`;
+      sendMail(x.contact_email,`Welcome to the HR portal — ${x.name}`,layout("Your company workspace is ready",
+        `<p>Hi,</p><p>The HR workspace for <b>${esc2(x.name)}</b> has been created. You have been set up as the <b>HR Admin</b> with full access to your company.</p>
+         <p><b>Login URL:</b> ${esc2(link)}<br><b>Username:</b> ${esc2(x.admin_username)}<br><b>Password:</b> ${x.send_password?esc2(x.admin_password):"(shared with you separately)"}</p>
+         <p><b>Getting started</b></p>
+         <ol style="padding-left:18px;line-height:1.6"><li>Sign in and change your password (Password button, top right).</li>
+         <li>Open HR Policies and set the company profile, letterhead, working hours and email settings.</li>
+         <li>Open Team to create logins for your Director, Finance and Managers.</li>
+         <li>Add your employees and create their logins from the Employees page.</li></ol>
+         <p>Your employees will receive their own login by email once you create it.</p>`),
+        {smtp_user:x.smtp_user,smtp_pass:x.smtp_pass,name:x.name,company_id:companyId}).catch(()=>{});
     }
     res.json({ok:true,id:companyId});
   }catch(e){res.status(400).json({error:/duplicate key|unique/i.test(e.message)?"Company code already exists":e.message})}
+}));
+app.delete("/api/companies/:id",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  const id=Number(req.params.id);
+  const c=await db.prepare("SELECT id,name FROM companies WHERE id=?").get(id);
+  if(!c)return res.status(404).json({error:"Company not found"});
+  if(String(req.body?.confirm_name||"").trim()!==c.name)return res.status(400).json({error:"Type the exact company name to confirm the deletion"});
+  await db.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE company_id=?)").run(id);
+  await db.prepare("DELETE FROM password_resets WHERE user_id IN (SELECT id FROM users WHERE company_id=?)").run(id);
+  await db.prepare("DELETE FROM images WHERE company_id=? OR (kind='company' AND ref_id=?)").run(id,id);
+  const tables=await db.prepare("SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='company_id' AND table_name NOT IN ('companies','audit_logs','email_log')").all();
+  for(const t of tables)await db.prepare(`DELETE FROM "${t.table_name}" WHERE company_id=?`).run(id);
+  await db.prepare("DELETE FROM companies WHERE id=?").run(id);
+  await audit({user:{...req.user,company_id:null}},"DELETE","COMPANY",c.name);
+  res.json({ok:true});
 }));
 const EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 app.put("/api/companies/:id",auth,roles("Super Admin"),wrap(async(req,res)=>{
