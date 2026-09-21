@@ -205,7 +205,8 @@ async function seed(){
     const s=crypto.randomBytes(16).toString("hex");
     await db.prepare("INSERT INTO users(company_id,username,password_hash,role) VALUES(NULL,?,?,?)").run("admin",hash("Admin@12345",s),"Super Admin");
   }
-  if(!await db.prepare("SELECT id FROM companies LIMIT 1").get()){
+  // The sample company with well-known logins is created only when explicitly requested (SEED_DEMO=true), never in production.
+  if(process.env.SEED_DEMO==="true"&&!await db.prepare("SELECT id FROM companies LIMIT 1").get()){
     const c=await db.prepare("INSERT INTO companies(name,code,industry,address,contact_email,contact_phone,status) VALUES(?,?,?,?,?,?,?)")
       .run("BMS Demo Company","BMSDEMO","Business Services","Head Office, India","hr@bmsdemo.local","9999999999","Active");
     const companyId=c.lastInsertRowid;
