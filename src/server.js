@@ -82,6 +82,12 @@ CREATE TABLE IF NOT EXISTS loans(
 CREATE TABLE IF NOT EXISTS loan_recoveries(
  loan_id INTEGER NOT NULL,month TEXT NOT NULL,amount REAL DEFAULT 0,PRIMARY KEY(loan_id,month)
 );
+CREATE TABLE IF NOT EXISTS employee_managers(
+ company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,manager_id INTEGER NOT NULL,PRIMARY KEY(employee_id,manager_id)
+);
+CREATE TABLE IF NOT EXISTS attendance_breaks(
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,work_date TEXT,kind TEXT,start_at TEXT,end_at TEXT
+);
 CREATE TABLE IF NOT EXISTS punches(
  id SERIAL PRIMARY KEY,company_id INTEGER,biometric_id TEXT,punch_time TEXT,punch_type TEXT,device_id INTEGER,raw_payload TEXT,
  UNIQUE(company_id,biometric_id,punch_time)
@@ -167,6 +173,8 @@ try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){
 try{await db.exec("ALTER TABLE users ADD COLUMN full_name TEXT")}catch(e){}
 try{await db.exec("ALTER TABLE leave_requests ADD COLUMN decision_reason TEXT")}catch(e){}
 try{await db.exec("ALTER TABLE leave_types ADD COLUMN eligible_after_months INTEGER DEFAULT 0")}catch(e){}
+try{await db.exec("ALTER TABLE leave_types ADD COLUMN min_notice_days INTEGER DEFAULT 0");await db.exec("UPDATE leave_types SET min_notice_days=2 WHERE name ILIKE 'PL%'")}catch(e){}
+try{await db.exec("INSERT INTO employee_managers(company_id,employee_id,manager_id) SELECT company_id,id,reporting_manager_id FROM employees WHERE reporting_manager_id IS NOT NULL ON CONFLICT DO NOTHING")}catch(e){}
 for(const col of ["claim_ref TEXT","kind TEXT DEFAULT 'Reimbursement'","bill_name TEXT","bill_mime TEXT","bill_data BYTEA","reject_reason TEXT","tour_place TEXT","tour_to TEXT"]){try{await db.exec(`ALTER TABLE expenses ADD COLUMN ${col}`)}catch(e){}}
 for(const col of ["status TEXT DEFAULT 'Issued'","employee_signature TEXT","employee_signed_name TEXT","employee_signed_at TEXT"]){try{await db.exec(`ALTER TABLE letters ADD COLUMN ${col}`)}catch(e){}}
 for(const col of ["in_loc TEXT","out_loc TEXT"]){try{await db.exec(`ALTER TABLE attendance ADD COLUMN ${col}`)}catch(e){}}
@@ -182,7 +190,7 @@ for(const col of ["reporting_manager_id INTEGER","pf_number TEXT","esic_number T
 for(const col of ["category TEXT DEFAULT 'Leave'"]){
   try{await db.exec(`ALTER TABLE leave_requests ADD COLUMN ${col}`)}catch(e){}
 }
-for(const col of ["other_earnings REAL DEFAULT 0","other_earn_label TEXT","ded_label TEXT","loan_deduction REAL DEFAULT 0","utr TEXT","paid_at TEXT","paid_mode TEXT","basic REAL DEFAULT 0","hra REAL DEFAULT 0","pf_employee REAL DEFAULT 0","esic_employee REAL DEFAULT 0","tds REAL DEFAULT 0","lop_days REAL DEFAULT 0"]){
+for(const col of ["penalty_days REAL DEFAULT 0","penalty_amount REAL DEFAULT 0","late_count INTEGER DEFAULT 0","early_count INTEGER DEFAULT 0","other_earnings REAL DEFAULT 0","other_earn_label TEXT","ded_label TEXT","loan_deduction REAL DEFAULT 0","utr TEXT","paid_at TEXT","paid_mode TEXT","basic REAL DEFAULT 0","hra REAL DEFAULT 0","pf_employee REAL DEFAULT 0","esic_employee REAL DEFAULT 0","tds REAL DEFAULT 0","lop_days REAL DEFAULT 0"]){
   try{await db.exec(`ALTER TABLE payroll ADD COLUMN ${col}`)}catch(e){}
 }
 for(const [oldN,newN] of [["Casual Leave","CL - Casual Leave"],["Sick Leave","SL - Sick Leave"],["Earned Leave","PL - Privilege Leave"]]){
@@ -214,6 +222,7 @@ async function seedCompanyDefaults(companyId){
   for(const [n,b] of [["CL - Casual Leave",12],["SL - Sick Leave",12],["PL - Privilege Leave",18],["Unpaid Leave",0]]){
     await db.prepare("INSERT OR IGNORE INTO leave_types(company_id,name,annual_balance) VALUES(?,?,?)").run(companyId,n,b);
   }
+  await db.prepare("UPDATE leave_types SET min_notice_days=2 WHERE company_id=? AND name LIKE 'PL%'").run(companyId);
 }
 
 async function seed(){
@@ -607,7 +616,10 @@ app.get("/api/employees",auth,requireCompany,wrap(async(req,res)=>{
   let rows=await db.prepare("SELECT e.*,(SELECT u.username FROM users u WHERE u.employee_id=e.id AND u.company_id=e.company_id ORDER BY u.id LIMIT 1) AS login_username,(SELECT a.status FROM agreements a WHERE a.employee_id=e.id ORDER BY a.id DESC LIMIT 1) AS agreement_status,(SELECT l.status FROM letters l WHERE l.employee_id=e.id AND l.letter_type='Offer Letter' ORDER BY l.id DESC LIMIT 1) AS offer_status,(SELECT l.status FROM letters l WHERE l.employee_id=e.id AND l.letter_type='Appointment Letter' ORDER BY l.id DESC LIMIT 1) AS appointment_status FROM employees e WHERE e.company_id=? ORDER BY e.id DESC").all(req.user.company_id);
   if(!["Super Admin","HR Admin"].includes(req.user.role))rows=rows.map(({login_username,...r})=>r);
   if(req.user.role==="Employee") rows=rows.filter(x=>x.id===req.user.employee_id);
-  else if(req.user.role==="Manager" && req.user.employee_id) rows=rows.filter(x=>x.reporting_manager_id===req.user.employee_id || x.id===req.user.employee_id);
+  const mm=await db.prepare("SELECT employee_id,manager_id FROM employee_managers WHERE company_id=?").all(req.user.company_id);
+  const byEmp={};for(const m of mm)(byEmp[m.employee_id]=byEmp[m.employee_id]||[]).push(m.manager_id);
+  rows=rows.map(r=>({...r,manager_ids:byEmp[r.id]||(r.reporting_manager_id?[r.reporting_manager_id]:[])}));
+  if(req.user.role==="Manager" && req.user.employee_id) rows=rows.filter(x=>x.manager_ids.includes(req.user.employee_id) || x.id===req.user.employee_id);
   res.json(rows);
 }));
 // When an employee is created or given a Biometric ID after the device has already sent punches,
@@ -634,6 +646,7 @@ app.post("/api/employees",auth,requireCompany,roles("Super Admin","HR Admin"),wr
     const r=await db.prepare(`INSERT INTO employees(company_id,employee_code,name,email,phone,department,designation,manager,reporting_manager_id,branch,joining_date,status,biometric_id,salary,bank_name,bank_account,ifsc,pf_number,esic_number,uan_number,pan_number,date_of_birth,basic_salary,hra,other_allowances,pf_applicable,esic_applicable)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.company_id,x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.reporting_manager_id||null,x.branch,x.joining_date,x.status||"Active",x.biometric_id||null,x.salary||0,x.bank_name,x.bank_account,x.ifsc,x.pf_number||null,x.esic_number||null,x.uan_number||null,x.pan_number||null,x.date_of_birth||null,x.basic_salary||0,x.hra||0,x.other_allowances||0,+!!x.pf_applicable,+!!x.esic_applicable);
     await db.prepare("INSERT OR IGNORE INTO onboarding(company_id,employee_id) VALUES(?,?)").run(req.user.company_id,r.lastInsertRowid);
+    if(x.manager_ids!==undefined||x.reporting_manager_id)await saveManagers(req.user.company_id,r.lastInsertRowid,Array.isArray(x.manager_ids)?x.manager_ids:[x.reporting_manager_id]);
     await backfillFromPunches(req.user.company_id,x.biometric_id);
     await audit(req,"CREATE","EMPLOYEE",x.employee_code);res.json({id:r.lastInsertRowid});
     notifyEmployeeWelcome(req.user.company_id,x).catch(e=>console.error("welcome mail",e.message));
@@ -645,6 +658,7 @@ app.put("/api/employees/:id",auth,requireCompany,roles("Super Admin","HR Admin")
     const r=await db.prepare(`UPDATE employees SET employee_code=?,name=?,email=?,phone=?,department=?,designation=?,manager=?,reporting_manager_id=?,branch=?,joining_date=?,status=?,biometric_id=?,salary=?,bank_name=?,bank_account=?,ifsc=?,pf_number=?,esic_number=?,uan_number=?,pan_number=?,date_of_birth=?,basic_salary=?,hra=?,other_allowances=?,pf_applicable=?,esic_applicable=? WHERE id=? AND company_id=?`)
       .run(x.employee_code,x.name,x.email,x.phone,x.department,x.designation,x.manager,x.reporting_manager_id||null,x.branch,x.joining_date,x.status||"Active",x.biometric_id||null,x.salary||0,x.bank_name,x.bank_account,x.ifsc,x.pf_number||null,x.esic_number||null,x.uan_number||null,x.pan_number||null,x.date_of_birth||null,x.basic_salary||0,x.hra||0,x.other_allowances||0,+!!x.pf_applicable,+!!x.esic_applicable,req.params.id,req.user.company_id);
     if(r.changes===0)return res.status(404).json({error:"Employee not found"});
+    if(x.manager_ids!==undefined)await saveManagers(req.user.company_id,Number(req.params.id),Array.isArray(x.manager_ids)?x.manager_ids:[]);
     await backfillFromPunches(req.user.company_id,x.biometric_id);
     await audit(req,"UPDATE","EMPLOYEE",x.employee_code);res.json({ok:true});
   }catch(e){res.status(400).json({error:friendlyDupError(e)})}
@@ -1318,7 +1332,7 @@ app.post("/api/departments",auth,requireCompany,roles("Super Admin","HR Admin"),
 }));
 
 /* ---------------- Work timing (company default + per-employee override) ---------------- */
-const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true,web_clock:true,require_location:false,allow_remote:true,office_lat:null,office_lng:null,office_radius:200,ot_enabled:true,ot_min_minutes:30};
+const DEFAULT_TIMING={start:"09:30",end:"18:30",grace:15,break_on:true,break_start:"13:30",break_end:"14:00",min_hours:8,notify_low_hours:true,notify_late:true,web_clock:true,require_location:false,allow_remote:true,office_lat:null,office_lng:null,office_radius:200,ot_enabled:true,ot_min_minutes:30,late_free:3,early_free:2,late_penalty_days:0,early_penalty_days:0,early_grace:15,early_in_notify:60,notify_early:true,lunch_minutes:30,tea_minutes:15};
 const distM=(a,b,c,d)=>{const R=6371000,r=x=>x*Math.PI/180,dl=r(c-a),dn=r(d-b),h=Math.sin(dl/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 const HHMM=/^([01]\d|2[0-3]):[0-5]\d$/;
 function cleanTiming(x,partial){
@@ -1332,26 +1346,43 @@ function cleanTiming(x,partial){
   }
   if(x?.office_radius!==undefined&&x.office_radius!==""){const v=Number(x.office_radius);if(!(v>=20&&v<=5000))throw new Error("Office radius must be between 20 and 5000 metres");o.office_radius=v}
   if(x?.ot_min_minutes!==undefined&&x.ot_min_minutes!==""){const v=Number(x.ot_min_minutes);if(!(v>=0&&v<=240))throw new Error("Overtime threshold must be between 0 and 240 minutes");o.ot_min_minutes=v}
-  for(const k of ["break_on","notify_low_hours","notify_late","web_clock","require_location","allow_remote","ot_enabled"])if(x?.[k]!==undefined)o[k]=!!x[k];
+  for(const [k,max] of [["late_free",31],["early_free",31],["early_grace",240],["early_in_notify",600],["lunch_minutes",240],["tea_minutes",120]])if(x?.[k]!==undefined&&x[k]!==""){const v=Number(x[k]);if(!(Number.isInteger(v)&&v>=0&&v<=max))throw new Error(`${k.replace(/_/g," ")} must be a whole number between 0 and ${max}`);o[k]=v}
+  for(const k of ["late_penalty_days","early_penalty_days"])if(x?.[k]!==undefined&&x[k]!==""){const v=Number(x[k]);if(!(v>=0&&v<=3))throw new Error("Penalty days per extra occurrence must be between 0 and 3");o[k]=v}
+  for(const k of ["break_on","notify_low_hours","notify_late","notify_early","web_clock","require_location","allow_remote","ot_enabled"])if(x?.[k]!==undefined)o[k]=!!x[k];
   if(!partial&&(!o.start||!o.end))throw new Error("Start and close time are required");
   return o;
+}
+async function saveManagers(companyId,empId,ids){
+  const list=[...new Set((ids||[]).map(Number).filter(n=>n&&n!==Number(empId)))].slice(0,4);
+  const ok=[];
+  for(const id of list){if(await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(id,companyId))ok.push(id)}
+  await db.prepare("DELETE FROM employee_managers WHERE employee_id=?").run(empId);
+  for(const id of ok)await db.prepare("INSERT INTO employee_managers(company_id,employee_id,manager_id) VALUES(?,?,?) ON CONFLICT DO NOTHING").run(companyId,empId,id);
+  const first=ok[0]||null;
+  const nm=first?(await db.prepare("SELECT name FROM employees WHERE id=?").get(first))?.name:null;
+  await db.prepare("UPDATE employees SET reporting_manager_id=?,manager=? WHERE id=?").run(first,nm,empId);
 }
 function parseJSON(t){try{return JSON.parse(t||"")||{}}catch{return {}}}
 function timingFor(company,emp){return {...DEFAULT_TIMING,...parseJSON(company?.work_timing),...parseJSON(emp?.work_timing)}}
 const toMin=t=>{const [h,m]=String(t).split(":").map(Number);return h*60+m};
-function dayMetrics(t,firstIn,lastOut){
-  const r={late_minutes:0,worked_minutes:0,overtime_minutes:0};
+function dayMetrics(t,firstIn,lastOut,actualBreak){
+  const r={late_minutes:0,worked_minutes:0,overtime_minutes:0,early_minutes:0,early_in_minutes:0};
   if(!firstIn||firstIn.length<16)return r;
   const inM=toMin(firstIn.slice(11,16));
   r.late_minutes=Math.max(0,inM-(toMin(t.start)+Number(t.grace||0)));
+  r.early_in_minutes=Math.max(0,toMin(t.start)-inM);
   if(lastOut&&lastOut.length>=16){
-    let w=toMin(lastOut.slice(11,16))-inM;
+    const outM=toMin(lastOut.slice(11,16));
+    let w=outM-inM;
     const bLen=t.break_on?Math.max(0,toMin(t.break_end)-toMin(t.break_start)):0;
-    if(t.break_on&&inM<toMin(t.break_start)&&toMin(lastOut.slice(11,16))>toMin(t.break_end))w-=bLen;
+    if(actualBreak!=null&&actualBreak>0)w-=actualBreak;            // real lunch / tea breaks taken with the web clock
+    else if(t.break_on&&inM<toMin(t.break_start)&&outM>toMin(t.break_end))w-=bLen;
     r.worked_minutes=Math.max(0,w);
     // Overtime is the time worked after the shift close time, counted only once it passes the threshold.
-    const after=toMin(lastOut.slice(11,16))-toMin(t.end);
+    const after=outM-toMin(t.end);
     r.overtime_minutes=t.ot_enabled&&after>0&&after>=Number(t.ot_min_minutes||0)?after:0;
+    const before=toMin(t.end)-outM;
+    r.early_minutes=before>Number(t.early_grace||0)?before:0;
   }
   return r;
 }
@@ -1391,8 +1422,8 @@ async function notifyAgreementStep(companyId,empId,status){
 async function notifyLeaveApplied(companyId,empId,x){
   const emp=await db.prepare("SELECT name,employee_code,reporting_manager_id FROM employees WHERE id=?").get(empId);
   if(!emp)return;
-  const mgr=emp.reporting_manager_id?await db.prepare("SELECT email FROM employees WHERE id=?").get(emp.reporting_manager_id):null;
-  const to=[...new Set([mgr?.email,...await seniorEmails(companyId)].filter(Boolean))];
+  const mgrs=(await db.prepare("SELECT e.email FROM employee_managers em JOIN employees e ON e.id=em.manager_id WHERE em.employee_id=?").all(empId)).map(r=>r.email);
+  const to=[...new Set([...mgrs,...await seniorEmails(companyId)].filter(Boolean))];
   if(!to.length)return;
   const sender=await companySender(companyId);
   const label=x.category==="WFH"?"work from home":x.category==="Permission"?"permission":"leave";
@@ -1421,26 +1452,39 @@ function istNow(){
 async function sendDailyDigest(companyId,date,force){
   const co=await db.prepare("SELECT id,name,work_timing,smtp_user,smtp_pass FROM companies WHERE id=?").get(companyId);
   const base=timingFor(co,null);
-  if(!force&&!base.notify_low_hours&&!base.notify_late)return {sent:0,reason:"Notifications are off"};
-  const rows=await db.prepare("SELECT a.first_in,a.last_out,e.name,e.employee_code,e.work_timing FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? AND a.work_date=? AND e.status='Active'").all(companyId,date);
-  const late=[],low=[];
+  if(!force&&!base.notify_low_hours&&!base.notify_late&&base.notify_early===false)return {sent:0,reason:"Notifications are off"};
+  const rows=await db.prepare("SELECT a.first_in,a.last_out,e.id eid,e.name,e.employee_code,e.work_timing FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? AND a.work_date=? AND e.status='Active'").all(companyId,date);
+  const mm=await db.prepare("SELECT employee_id,manager_id FROM employee_managers WHERE company_id=?").all(companyId);
+  const late=[],low=[],early=[];
   for(const r of rows){
     const t=timingFor(co,r),m=dayMetrics(t,r.first_in,r.last_out);
     if((force||base.notify_late)&&m.late_minutes>0)late.push({...r,m});
+    if((force||base.notify_early!==false)&&m.early_minutes>0)early.push({...r,m});
     if((force||base.notify_low_hours)&&Number(t.min_hours)>0){
       const need=Math.round(t.min_hours*60);
       if(!r.last_out)low.push({...r,m,note:"No check-out recorded",need});
       else if(m.worked_minutes<need)low.push({...r,m,note:fmtHM(m.worked_minutes),need});
     }
   }
-  if(!late.length&&!low.length)return {sent:0,late:0,low:0,reason:"Nothing to report for today"};
+  if(!late.length&&!low.length&&!early.length)return {sent:0,late:0,low:0,early:0,reason:"Nothing to report for today"};
   const tbl=(head,items)=>`<table style="border-collapse:collapse;width:100%;font-size:13px;margin:8px 0 18px"><tr>${head.map(h=>`<th style="text-align:left;padding:6px;border:1px solid #e5e7eb;background:#f8fafc">${h}</th>`).join("")}</tr>${items.map(r=>`<tr>${r.map(c=>`<td style="padding:6px;border:1px solid #e5e7eb">${c}</td>`).join("")}</tr>`).join("")}</table>`;
-  const html=layout(`Attendance summary — ${date}`,
-    (late.length?`<h3 style="margin:10px 0 0">Late arrivals (${late.length})</h3>`+tbl(["Employee","First in","Late by"],late.map(r=>[esc2(r.employee_code+" - "+r.name),esc2((r.first_in||"").slice(11,16)),r.m.late_minutes+" min"])):"")+
-    (low.length?`<h3 style="margin:10px 0 0">Minimum working hours not completed (${low.length})</h3>`+tbl(["Employee","Worked","Required"],low.map(r=>[esc2(r.employee_code+" - "+r.name),esc2(r.note),fmtHM(r.need)])):""));
-  const to=await seniorEmails(companyId),sender={name:co.name,smtp_user:co.smtp_user,smtp_pass:co.smtp_pass,company_id:companyId};
-  for(const t of to)await sendMail(t,`Attendance summary ${date} — ${co.name}`,html,sender);
-  return {sent:to.length,late:late.length,low:low.length};
+  const build=(L,W,E)=>layout(`Attendance summary — ${date}`,
+    (L.length?`<h3 style="margin:10px 0 0">Late arrivals (${L.length})</h3>`+tbl(["Employee","First in","Late by"],L.map(r=>[esc2(r.employee_code+" - "+r.name),esc2((r.first_in||"").slice(11,16)),r.m.late_minutes+" min"])):"")+
+    (E.length?`<h3 style="margin:10px 0 0">Early check-outs (${E.length})</h3>`+tbl(["Employee","Last out","Left early by"],E.map(r=>[esc2(r.employee_code+" - "+r.name),esc2((r.last_out||"").slice(11,16)),r.m.early_minutes+" min"])):"")+
+    (W.length?`<h3 style="margin:10px 0 0">Minimum working hours not completed (${W.length})</h3>`+tbl(["Employee","Worked","Required"],W.map(r=>[esc2(r.employee_code+" - "+r.name),esc2(r.note),fmtHM(r.need)])):""));
+  const sender={name:co.name,smtp_user:co.smtp_user,smtp_pass:co.smtp_pass,company_id:companyId};
+  const to=await seniorEmails(companyId);let sent=0;
+  for(const t of to){await sendMail(t,`Attendance summary ${date} — ${co.name}`,build(late,low,early),sender);sent++}
+  // each reporting manager receives the lines of their own team
+  const mgrIds=[...new Set(mm.map(x=>x.manager_id))];
+  for(const mid of mgrIds){
+    const team=new Set(mm.filter(x=>x.manager_id===mid).map(x=>x.employee_id));
+    const L=late.filter(r=>team.has(r.eid)),W=low.filter(r=>team.has(r.eid)),E=early.filter(r=>team.has(r.eid));
+    if(!L.length&&!W.length&&!E.length)continue;
+    const me=await db.prepare("SELECT email FROM employees WHERE id=?").get(mid);
+    if(me?.email&&!to.includes(me.email)){await sendMail(me.email,`Your team's attendance ${date} — ${co.name}`,build(L,W,E),sender);sent++}
+  }
+  return {sent,late:late.length,low:low.length,early:early.length};
 }
 app.post("/api/work-timing/send-digest",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   res.json(await sendDailyDigest(req.user.company_id,istNow().date,true));
@@ -1492,6 +1536,19 @@ function istStamp(){
   const p=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).formatToParts(new Date()).map(x=>[x.type,x.value]));
   return `${p.year}-${p.month}-${p.day}T${String(+p.hour%24).padStart(2,"0")}:${p.minute}:${p.second}`;
 }
+const minsBetween=(a,b)=>Math.max(0,Math.round((new Date(b)-new Date(a))/60000));
+async function breakMap(companyId,rows){
+  if(!rows.length)return {};
+  const ds=rows.map(r=>r.work_date).sort();
+  const bs=await db.prepare("SELECT employee_id,work_date,start_at,end_at FROM attendance_breaks WHERE company_id=? AND work_date>=? AND work_date<=? AND end_at IS NOT NULL").all(companyId,ds[0],ds[ds.length-1]);
+  const m={};for(const b of bs){const k=b.employee_id+"|"+b.work_date;m[k]=(m[k]||0)+minsBetween(b.start_at,b.end_at)}return m;
+}
+// Emails HR and the employee's reporting managers (used for early / late clock events).
+async function notifyAttendanceEvent(companyId,empId,subject,title,html){
+  const mgr=(await db.prepare("SELECT e.email FROM employee_managers em JOIN employees e ON e.id=em.manager_id WHERE em.employee_id=? AND e.email IS NOT NULL AND e.email<>''").all(empId)).map(r=>r.email);
+  const hr=await roleEmails(companyId,["HR Admin"]);
+  await notifyMany(companyId,[...mgr,...hr],subject,title,html);
+}
 app.get("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.employee_id;
   const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
@@ -1499,7 +1556,10 @@ app.get("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
   if(!eid)return res.json({enabled:false,linked:false});
   const a=await db.prepare("SELECT first_in,last_out FROM attendance WHERE employee_id=? AND work_date=?").get(eid,istStamp().slice(0,10));
   const t=timingFor(co,null);
-  res.json({enabled,linked:true,first_in:a?.first_in||null,last_out:a?.last_out||null,require_location:!!t.require_location});
+  const bl=await db.prepare("SELECT id,kind,start_at,end_at FROM attendance_breaks WHERE employee_id=? AND work_date=? ORDER BY id").all(eid,istStamp().slice(0,10));
+  const open=bl.find(b=>!b.end_at)||null;
+  const total=k=>bl.filter(b=>b.end_at&&(!k||b.kind===k)).reduce((s,b)=>s+minsBetween(b.start_at,b.end_at),0);
+  res.json({enabled,linked:true,first_in:a?.first_in||null,last_out:a?.last_out||null,require_location:!!t.require_location,open_break:open?{kind:open.kind,start_at:open.start_at}:null,lunch_minutes:total("Lunch"),tea_minutes:total("Tea"),lunch_limit:t.lunch_minutes,tea_limit:t.tea_minutes});
 }));
 app.post("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
   const eid=req.user.employee_id;
@@ -1507,7 +1567,8 @@ app.post("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
   const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
   if(!timingFor(co,null).web_clock)return res.status(403).json({error:"Web clock in/out is turned off for your company"});
   const now=istStamp(),d=now.slice(0,10);
-  const t=timingFor(co,null);
+  const empRow=await db.prepare("SELECT id,name,employee_code,work_timing FROM employees WHERE id=?").get(eid);
+  const t=timingFor(co,empRow);
   const lat=Number(req.body.lat),lng=Number(req.body.lng),hasLoc=req.body.lat!=null&&req.body.lng!=null&&Number.isFinite(lat)&&Number.isFinite(lng)&&Math.abs(lat)<=90&&Math.abs(lng)<=180;
   if(t.require_location&&!hasLoc)return res.status(400).json({error:"Location access is required to clock in or out. Please allow location in your browser."});
   let loc=null;
@@ -1525,28 +1586,60 @@ app.post("/api/attendance/clock",auth,requireCompany,wrap(async(req,res)=>{
     if(a?.first_in)return res.status(400).json({error:"You have already clocked in today"});
     if(a)await db.prepare("UPDATE attendance SET first_in=?,status='Present',in_loc=? WHERE id=?").run(now,locJson,a.id);
     else await db.prepare("INSERT INTO attendance(company_id,employee_id,work_date,first_in,status,source,in_loc) VALUES(?,?,?,?,?,?,?)").run(req.user.company_id,eid,d,now,"Present","Web",locJson);
-    return res.json({ok:true,time:now,mode:loc?.mode||null});
+    res.json({ok:true,time:now,mode:loc?.mode||null});
+    const m=dayMetrics(t,now,null);
+    if(t.notify_early!==false&&(m.late_minutes>0||(Number(t.early_in_notify)>0&&m.early_in_minutes>=Number(t.early_in_notify)))){
+      const late=m.late_minutes>0;
+      notifyAttendanceEvent(req.user.company_id,eid,late?`Late check-in — ${empRow.name}`:`Early check-in — ${empRow.name}`,late?"Late check-in":"Early check-in",
+        `<p><b>${esc2(empRow.name)}</b> (${esc2(empRow.employee_code)}) clocked in at <b>${now.slice(11,16)}</b>; the shift starts at ${esc2(t.start)}${late?` (${m.late_minutes} min after the grace period)`:` (${m.early_in_minutes} min early)`}.</p>`).catch(()=>{});
+    }
+    return;
   }
   if(req.body.action==="out"){
     if(!a?.first_in)return res.status(400).json({error:"Clock in first"});
     await db.prepare("UPDATE attendance SET last_out=?,out_loc=? WHERE id=?").run(now,locJson,a.id);
-    return res.json({ok:true,time:now,mode:loc?.mode||null});
+    await db.prepare("UPDATE attendance_breaks SET end_at=? WHERE employee_id=? AND work_date=? AND end_at IS NULL").run(now,eid,d);
+    res.json({ok:true,time:now,mode:loc?.mode||null});
+    const m=dayMetrics(t,a.first_in,now);
+    if(t.notify_early!==false&&m.early_minutes>0)notifyAttendanceEvent(req.user.company_id,eid,`Early check-out — ${empRow.name}`,"Early check-out",
+      `<p><b>${esc2(empRow.name)}</b> (${esc2(empRow.employee_code)}) clocked out at <b>${now.slice(11,16)}</b>, ${m.early_minutes} min before the shift ends at ${esc2(t.end)}.</p>`).catch(()=>{});
+    return;
   }
   res.status(400).json({error:"Invalid action"});
 }));
 
+app.post("/api/attendance/break",auth,requireCompany,wrap(async(req,res)=>{
+  const eid=req.user.employee_id;
+  if(!eid)return res.status(400).json({error:"Your login is not linked to an employee record"});
+  const kind=req.body.kind==="Tea"?"Tea":"Lunch",now=istStamp(),d=now.slice(0,10);
+  const a=await db.prepare("SELECT first_in,last_out FROM attendance WHERE employee_id=? AND work_date=?").get(eid,d);
+  if(!a?.first_in||a.last_out)return res.status(400).json({error:"Breaks can only be recorded while you are clocked in"});
+  const open=await db.prepare("SELECT id,kind FROM attendance_breaks WHERE employee_id=? AND work_date=? AND end_at IS NULL").get(eid,d);
+  if(req.body.action==="start"){
+    if(open)return res.status(400).json({error:`Your ${open.kind.toLowerCase()} break is already running. End it first.`});
+    await db.prepare("INSERT INTO attendance_breaks(company_id,employee_id,work_date,kind,start_at) VALUES(?,?,?,?,?)").run(req.user.company_id,eid,d,kind,now);
+    return res.json({ok:true,time:now});
+  }
+  if(req.body.action==="end"){
+    if(!open)return res.status(400).json({error:"No break is running"});
+    await db.prepare("UPDATE attendance_breaks SET end_at=? WHERE id=?").run(now,open.id);
+    return res.json({ok:true,time:now});
+  }
+  res.status(400).json({error:"Invalid action"});
+}));
 app.get("/api/attendance",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT a.*,e.employee_code,e.name,e.department,e.work_timing AS emp_timing FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=?`;
   let params=[req.user.company_id];
   if(req.user.role==="Employee"){q+=" AND e.id=?";params.push(req.user.employee_id)}
-  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";params.push(req.user.employee_id,req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (EXISTS(SELECT 1 FROM employee_managers em WHERE em.employee_id=e.id AND em.manager_id=?) OR e.id=?)";params.push(req.user.employee_id,req.user.employee_id)}
   q+=" ORDER BY a.work_date DESC,a.first_in DESC";
   const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(req.user.company_id);
   const rows=await db.prepare(q).all(...params);
+  const bm=await breakMap(req.user.company_id,rows);
   res.json(rows.map(({emp_timing,...a})=>{
     if(a.source==="Manual"&&(a.late_minutes||a.overtime_minutes))return a;
-    const t=timingFor(co,{work_timing:emp_timing});
-    return {...a,...dayMetrics(t,a.first_in,a.last_out),min_minutes:Math.round(Number(t.min_hours||0)*60)};
+    const t=timingFor(co,{work_timing:emp_timing}),brk=bm[a.employee_id+"|"+a.work_date]||0;
+    return {...a,...dayMetrics(t,a.first_in,a.last_out,brk),break_minutes:brk,min_minutes:Math.round(Number(t.min_hours||0)*60)};
   }));
 }));
 app.post("/api/attendance/manual",auth,requireCompany,wrap(async(req,res)=>{
@@ -1564,7 +1657,7 @@ app.post("/api/attendance/manual",auth,requireCompany,wrap(async(req,res)=>{
 app.get("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT l.*,e.employee_code,e.name FROM leave_requests l JOIN employees e ON e.id=l.employee_id WHERE l.company_id=?`;
   let p=[req.user.company_id];if(req.user.role==="Employee"){q+=" AND l.employee_id=?";p.push(req.user.employee_id)}
-  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (EXISTS(SELECT 1 FROM employee_managers em WHERE em.employee_id=e.id AND em.manager_id=?) OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
   if(req.query.category){q+=" AND l.category=?";p.push(req.query.category)}
   q+=" ORDER BY l.id DESC";res.json(await db.prepare(q).all(...p));
 }));
@@ -1589,25 +1682,26 @@ function addMonthsISO(d,n){
 
 /* ---------------- Leave: policy, allotment, eligibility, approval with reason ---------------- */
 app.get("/api/leave-types",auth,requireCompany,wrap(async(req,res)=>{
-  res.json(await db.prepare("SELECT id,name,annual_balance,COALESCE(eligible_after_months,0) eligible_after_months FROM leave_types WHERE company_id=? ORDER BY id").all(req.user.company_id));
+  res.json(await db.prepare("SELECT id,name,annual_balance,COALESCE(eligible_after_months,0) eligible_after_months,COALESCE(min_notice_days,0) min_notice_days FROM leave_types WHERE company_id=? ORDER BY id").all(req.user.company_id));
 }));
 app.post("/api/leave-types",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body||{},name=String(x.name||"").trim();
-  const days=Number(x.annual_balance),months=Number(x.eligible_after_months||0);
+  const days=Number(x.annual_balance),months=Number(x.eligible_after_months||0),notice=Number(x.min_notice_days||0);
+  if(!(notice>=0&&notice<=30&&Number.isInteger(notice)))return res.status(400).json({error:"Advance notice must be a whole number of days between 0 and 30"});
   if(!name)return res.status(400).json({error:"Enter the leave type name"});
   if(!(days>=0&&days<=365))return res.status(400).json({error:"Days per year must be between 0 and 365"});
   if(!(months>=0&&months<=60&&Number.isInteger(months)))return res.status(400).json({error:"Applicable after (months) must be a whole number between 0 and 60"});
   if(x.id){
     const old=await db.prepare("SELECT name FROM leave_types WHERE id=? AND company_id=?").get(x.id,req.user.company_id);
     if(!old)return res.status(404).json({error:"Leave type not found"});
-    try{await db.prepare("UPDATE leave_types SET name=?,annual_balance=?,eligible_after_months=? WHERE id=? AND company_id=?").run(name,days,months,x.id,req.user.company_id)}
+    try{await db.prepare("UPDATE leave_types SET name=?,annual_balance=?,eligible_after_months=?,min_notice_days=? WHERE id=? AND company_id=?").run(name,days,months,notice,x.id,req.user.company_id)}
     catch(e){return res.status(400).json({error:"A leave type with this name already exists"})}
     if(old.name!==name){
       await db.prepare("UPDATE leave_requests SET leave_type=? WHERE company_id=? AND leave_type=?").run(name,req.user.company_id,old.name);
       await db.prepare("UPDATE leave_allotments SET leave_type=? WHERE company_id=? AND leave_type=?").run(name,req.user.company_id,old.name);
     }
   }else{
-    try{await db.prepare("INSERT INTO leave_types(company_id,name,annual_balance,eligible_after_months) VALUES(?,?,?,?)").run(req.user.company_id,name,days,months)}
+    try{await db.prepare("INSERT INTO leave_types(company_id,name,annual_balance,eligible_after_months,min_notice_days) VALUES(?,?,?,?,?)").run(req.user.company_id,name,days,months,notice)}
     catch(e){return res.status(400).json({error:"A leave type with this name already exists"})}
   }
   await audit(req,"UPDATE","LEAVE_POLICY",name);res.json({ok:true});
@@ -1650,7 +1744,7 @@ async function leaveBalanceFor(companyId,eid){
     const total=allot[t.name]!=null?allot[t.name]:Number(t.annual_balance||0);
     const from=addMonthsISO(emp?.joining_date,t.eligible_after_months||0);
     const eligible=!from||from<=today;
-    return {leave_type:t.name,annual_balance:total,used:used[t.name]||0,remaining:total-(used[t.name]||0),eligible,available_from:eligible?null:from,eligible_after_months:t.eligible_after_months||0,custom:allot[t.name]!=null};
+    return {leave_type:t.name,annual_balance:total,used:used[t.name]||0,remaining:total-(used[t.name]||0),eligible,available_from:eligible?null:from,eligible_after_months:t.eligible_after_months||0,min_notice_days:t.min_notice_days||0,custom:allot[t.name]!=null};
   });
 }
 app.get("/api/leaves/balance",auth,requireCompany,wrap(async(req,res)=>{
@@ -1659,7 +1753,7 @@ app.get("/api/leaves/balance",auth,requireCompany,wrap(async(req,res)=>{
   res.json(await leaveBalanceFor(req.user.company_id,eid));
 }));
 app.post("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
-  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
+  const eid=req.user.role==="Employee"?req.user.employee_id:(Number(req.body.employee_id)||req.user.employee_id);
   const emp=await db.prepare("SELECT id FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
   const category=["WFH","Permission"].includes(req.body.category)?req.body.category:"Leave";
@@ -1670,6 +1764,10 @@ app.post("/api/leaves",auth,requireCompany,wrap(async(req,res)=>{
     const bal=(await leaveBalanceFor(req.user.company_id,eid)).find(b=>b.leave_type===req.body.leave_type);
     if(!bal)return res.status(400).json({error:"Choose a valid leave type"});
     if(bal.available_from&&req.body.from_date<bal.available_from)return res.status(400).json({error:`${bal.leave_type} becomes available from ${fmtDate(bal.available_from)} (${bal.eligible_after_months} month(s) after joining).`});
+    if(bal.min_notice_days>0){
+      const ahead=Math.floor((new Date(req.body.from_date+"T00:00:00Z")-new Date(istNow().date+"T00:00:00Z"))/86400000);
+      if(ahead<bal.min_notice_days)return res.status(400).json({error:`${bal.leave_type} must be applied at least ${bal.min_notice_days} day(s) in advance. For a leave starting sooner please apply for Casual Leave or Unpaid Leave (LWP) instead.`});
+    }
     if(bal.annual_balance>0&&days>bal.remaining)return res.status(400).json({error:`Only ${bal.remaining} day(s) of ${bal.leave_type} are left this year.`});
   }
   const r=await db.prepare(`INSERT INTO leave_requests(company_id,employee_id,leave_type,from_date,to_date,days,reason,category) VALUES(?,?,?,?,?,?,?,?)`)
@@ -1681,8 +1779,12 @@ app.post("/api/leaves/:id/status",auth,requireCompany,roles("Super Admin","HR Ad
   const status=String(req.body.status||""),reason=String(req.body.reason||"").trim();
   if(!["Approved","Rejected"].includes(status))return res.status(400).json({error:"Choose Approved or Rejected"});
   if(status==="Rejected"&&!reason)return res.status(400).json({error:"Please give a reason for rejecting this request."});
-  const r=await db.prepare("UPDATE leave_requests SET status=?,approved_by=?,decision_reason=? WHERE id=? AND company_id=?").run(status,req.user.username,reason||null,req.params.id,req.user.company_id);
-  if(r.changes===0)return res.status(404).json({error:"Leave request not found"});
+  const lr=await db.prepare("SELECT employee_id,status,approved_by FROM leave_requests WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!lr)return res.status(404).json({error:"Leave request not found"});
+  if(lr.status!=="Pending")return res.status(400).json({error:`This request was already ${lr.status.toLowerCase()}${lr.approved_by?" by "+lr.approved_by:""}. It can only be viewed now.`});
+  if(req.user.employee_id&&req.user.employee_id===lr.employee_id)return res.status(403).json({error:"You cannot decide your own request. Another manager or HR will do it."});
+  if(req.user.role==="Manager"&&!await db.prepare("SELECT 1 x FROM employee_managers WHERE employee_id=? AND manager_id=?").get(lr.employee_id,req.user.employee_id||0))return res.status(403).json({error:"This employee does not report to you"});
+  await db.prepare("UPDATE leave_requests SET status=?,approved_by=?,decision_reason=? WHERE id=? AND company_id=?").run(status,req.user.full_name||req.user.username,reason||null,req.params.id,req.user.company_id);
   await audit(req,status,"LEAVE",req.params.id);res.json({ok:true});
   notifyLeaveDecision(req.user.company_id,req.params.id,status,req.user.full_name||req.user.username,reason).catch(e=>console.error("leave notify",e.message));
 }));
@@ -1777,20 +1879,20 @@ async function nextClaimRef(companyId,kind){
 app.get("/api/expenses",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT x.id,x.company_id,x.employee_id,x.category,x.amount,x.expense_date,x.description,x.status,x.claim_ref,x.kind,x.bill_name,x.reject_reason,x.tour_place,x.tour_to,(x.bill_data IS NOT NULL) AS has_bill,e.name employee_name,e.employee_code FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?`;let p=[req.user.company_id];
   if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id)}
-  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (e.reporting_manager_id=? OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND (EXISTS(SELECT 1 FROM employee_managers em WHERE em.employee_id=e.id AND em.manager_id=?) OR e.id=?)";p.push(req.user.employee_id,req.user.employee_id)}
   q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
 }));
 app.get("/api/expenses/:id/bill",auth,requireCompany,wrap(async(req,res)=>{
-  const x=await db.prepare("SELECT x.bill_name,x.bill_mime,x.bill_data,x.employee_id,e.reporting_manager_id FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.id=? AND x.company_id=?").get(req.params.id,req.user.company_id);
+  const x=await db.prepare("SELECT x.bill_name,x.bill_mime,x.bill_data,x.employee_id,(SELECT COUNT(*) FROM employee_managers em WHERE em.employee_id=x.employee_id AND em.manager_id=?) AS is_mgr FROM expenses x JOIN employees e ON e.id=x.employee_id WHERE x.id=? AND x.company_id=?").get(req.user.employee_id||0,req.params.id,req.user.company_id);
   if(!x||!x.bill_data)return res.status(404).json({error:"Bill not found"});
   if(req.user.role==="Employee"&&x.employee_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
-  if(req.user.role==="Manager"&&x.employee_id!==req.user.employee_id&&x.reporting_manager_id!==req.user.employee_id)return res.status(403).json({error:"Permission denied"});
+  if(req.user.role==="Manager"&&x.employee_id!==req.user.employee_id&&Number(x.is_mgr)===0)return res.status(403).json({error:"Permission denied"});
   res.set({"Content-Type":x.bill_mime||"application/octet-stream","Content-Disposition":`inline; filename="${String(x.bill_name||"bill").replace(/[^\w.\-]/g,"_")}"`,"X-Content-Type-Options":"nosniff"});
   res.send(x.bill_data);
 }));
 // One submission can hold several expense lines (each with its own bill) or a single tour advance request.
 app.post("/api/expenses/batch",auth,requireCompany,wrap(async(req,res)=>{
-  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
+  const eid=req.user.role==="Employee"?req.user.employee_id:(Number(req.body.employee_id)||req.user.employee_id);
   const emp=await db.prepare("SELECT id,name,employee_code FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
   const kind=req.body.kind==="Tour Advance"?"Tour Advance":"Reimbursement";
@@ -1839,7 +1941,7 @@ app.get("/api/tickets",auth,requireCompany,wrap(async(req,res)=>{
   if(req.user.role==="Employee"){q+=" AND t.employee_id=?";p.push(req.user.employee_id)}q+=" ORDER BY t.id DESC";res.json(await db.prepare(q).all(...p));
 }));
 app.post("/api/tickets",auth,requireCompany,wrap(async(req,res)=>{
-  const eid=req.user.role==="Employee"?req.user.employee_id:Number(req.body.employee_id);
+  const eid=req.user.role==="Employee"?req.user.employee_id:(Number(req.body.employee_id)||req.user.employee_id);
   const emp=await db.prepare("SELECT id,name,email,employee_code FROM employees WHERE id=? AND company_id=?").get(eid,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found in this company"});
   const x=req.body;
@@ -1926,7 +2028,7 @@ async function buildPayslipPdf(companyId,p,emp){
     const basic=Number(p.basic||0),hra=Number(p.hra||0),gross=Number(p.gross||0),other=Math.max(0,gross-basic-hra),ot=Number(p.ot||0);
     const otherEarn=Number(p.other_earnings||0);
     const earn=[["Basic",basic],["HRA",hra],["Other allowances",other],["Overtime",ot],["Other earnings"+(p.other_earn_label?" ("+p.other_earn_label+")":""),otherEarn]].filter(r=>r[1]>0||r[0]==="Basic");
-    const ded=[["Loss of pay",p.lop],["PF (employee)",p.pf_employee],["ESIC (employee)",p.esic_employee],["TDS",p.tds],["Other deductions"+(p.ded_label?" ("+p.ded_label+")":""),p.deductions],["Loan / advance recovery",p.loan_deduction]].filter(r=>Number(r[1])>0);
+    const ded=[["Loss of pay",p.lop],["PF (employee)",p.pf_employee],["ESIC (employee)",p.esic_employee],["TDS",p.tds],["Other deductions"+(p.ded_label?" ("+p.ded_label+")":""),p.deductions],["Loan / advance recovery",p.loan_deduction],["Late / early penalty ("+Number(p.penalty_days||0)+" day(s))",p.penalty_amount]].filter(r=>Number(r[1])>0);
     const hw=(W-10)/2,xe=L,xd=L+hw+10;
     doc.rect(xe,y,hw,20).fill("#eef2ff");doc.rect(xd,y,hw,20).fill("#eef2ff");
     doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#312e81").text("EARNINGS",xe+8,y+6).text("DEDUCTIONS",xd+8,y+6);
@@ -2026,6 +2128,15 @@ app.post("/api/payroll/:id/mark-paid",auth,requireCompany,roles("Super Admin","H
   res.json({ok:true});
 }));
 
+async function attendancePenalty(companyId,emp,month){
+  const co=await db.prepare("SELECT work_timing FROM companies WHERE id=?").get(companyId);
+  const t=timingFor(co,emp);
+  const rows=await db.prepare("SELECT first_in,last_out FROM attendance WHERE employee_id=? AND work_date LIKE ? AND status IN ('Present','Half Day')").all(emp.id,month+"%");
+  let late=0,early=0;
+  for(const r of rows){const m=dayMetrics(t,r.first_in,r.last_out);if(m.late_minutes>0)late++;if(m.early_minutes>0)early++}
+  const exLate=Math.max(0,late-Number(t.late_free||0)),exEarly=Math.max(0,early-Number(t.early_free||0));
+  return {lateCount:late,earlyCount:early,extraLate:exLate,extraEarly:exEarly,penaltyDays:exLate*Number(t.late_penalty_days||0)+exEarly*Number(t.early_penalty_days||0)};
+}
 async function computePayroll(companyId,emp,month){
   const [y,m]=month.split("-").map(Number);
   const daysInMonth=new Date(y,m,0).getDate();
@@ -2040,7 +2151,9 @@ async function computePayroll(companyId,emp,month){
   const payableRatio=(daysInMonth-lopDays)/daysInMonth;
   const pfEmployee=emp.pf_applicable?+(basic*payableRatio*0.12).toFixed(2):0;
   const esicEmployee=(emp.esic_applicable && gross<=21000)?+(gross*payableRatio*0.0075).toFixed(2):0;
-  return {daysInMonth,lopDays,gross:+gross.toFixed(2),lop,pfEmployee,esicEmployee,basic,hra,other};
+  const pen=await attendancePenalty(companyId,emp,month);
+  const penaltyDays=Math.min(daysInMonth,pen.penaltyDays),penaltyAmount=+(perDay*penaltyDays).toFixed(2);
+  return {daysInMonth,lopDays,gross:+gross.toFixed(2),lop,pfEmployee,esicEmployee,basic,hra,other,...pen,penaltyDays,penaltyAmount};
 }
 async function processOnePayroll(req,employeeId,month,overrides={}){
   const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(employeeId,req.user.company_id);
@@ -2057,11 +2170,12 @@ async function processOnePayroll(req,employeeId,month,overrides={}){
   const earnLabel=String(overrides.other_earn_label||"").trim().slice(0,60)||null,dedLabel=String(overrides.ded_label||"").trim().slice(0,60)||null;
   const loanRows=overrides.loan_deduction!=null?null:await loanDue(emp.id,month);
   const loanDed=overrides.loan_deduction!=null?Number(overrides.loan_deduction)||0:loanRows.reduce((a,r)=>a+r.amount,0);
-  const net=+(gross-deductions-lop-pfEmployee-esicEmployee-tds+ot+otherEarn-loanDed).toFixed(2);
+  const penaltyAmt=overrides.penalty_amount!=null&&overrides.penalty_amount!==""?Number(overrides.penalty_amount)||0:calc.penaltyAmount;
+  const net=+(gross-deductions-lop-pfEmployee-esicEmployee-tds+ot+otherEarn-loanDed-penaltyAmt).toFixed(2);
   const no="BMS-"+Date.now()+"-"+employeeId;
-  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no,pf_employee,esic_employee,tds,lop_days,basic,hra,other_earnings,other_earn_label,ded_label,loan_deduction) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no,pf_employee=excluded.pf_employee,esic_employee=excluded.esic_employee,tds=excluded.tds,lop_days=excluded.lop_days,basic=excluded.basic,hra=excluded.hra,other_earnings=excluded.other_earnings,other_earn_label=excluded.other_earn_label,ded_label=excluded.ded_label,loan_deduction=excluded.loan_deduction,utr=NULL,paid_at=NULL,paid_mode=NULL`)
-    .run(req.user.company_id,employeeId,month,gross,deductions,lop,ot,net,overrides.status||"Processed",no,pfEmployee,esicEmployee,tds,calc.lopDays,calc.basic,calc.hra,otherEarn,earnLabel,dedLabel,loanDed);
+  await db.prepare(`INSERT INTO payroll(company_id,employee_id,month,gross,deductions,lop,ot,net,status,payslip_no,pf_employee,esic_employee,tds,lop_days,basic,hra,other_earnings,other_earn_label,ded_label,loan_deduction,penalty_days,penalty_amount,late_count,early_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(employee_id,month) DO UPDATE SET gross=excluded.gross,deductions=excluded.deductions,lop=excluded.lop,ot=excluded.ot,net=excluded.net,status=excluded.status,payslip_no=excluded.payslip_no,pf_employee=excluded.pf_employee,esic_employee=excluded.esic_employee,tds=excluded.tds,lop_days=excluded.lop_days,basic=excluded.basic,hra=excluded.hra,other_earnings=excluded.other_earnings,other_earn_label=excluded.other_earn_label,ded_label=excluded.ded_label,loan_deduction=excluded.loan_deduction,penalty_days=excluded.penalty_days,penalty_amount=excluded.penalty_amount,late_count=excluded.late_count,early_count=excluded.early_count,utr=NULL,paid_at=NULL,paid_mode=NULL`)
+    .run(req.user.company_id,employeeId,month,gross,deductions,lop,ot,net,overrides.status||"Processed",no,pfEmployee,esicEmployee,tds,calc.lopDays,calc.basic,calc.hra,otherEarn,earnLabel,dedLabel,loanDed,calc.penaltyDays,penaltyAmt,calc.lateCount,calc.earlyCount);
   if(loanRows&&loanRows.length)await recordLoanRecoveries(emp.id,month,loanRows);
   await audit(req,"UPSERT","PAYROLL",month+":"+emp.employee_code);
   const row=await db.prepare("SELECT * FROM payroll WHERE employee_id=? AND month=?").get(employeeId,month);
@@ -2120,15 +2234,15 @@ app.post("/api/onboarding/:id",auth,requireCompany,roles("Super Admin","HR Admin
 
 async function isInTeam(req,employeeId){
   if(req.user.role==="Manager" && req.user.employee_id){
-    const e=await db.prepare("SELECT reporting_manager_id FROM employees WHERE id=? AND company_id=?").get(employeeId,req.user.company_id);
-    return !!e && e.reporting_manager_id===req.user.employee_id;
+    const e=await db.prepare("SELECT 1 x FROM employee_managers WHERE employee_id=? AND manager_id=? AND company_id=?").get(employeeId,req.user.employee_id,req.user.company_id);
+    return !!e;
   }
   return true;
 }
 app.get("/api/performance",auth,requireCompany,wrap(async(req,res)=>{
   let q=`SELECT p.*,e.employee_code,e.name FROM performance p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=?`;let p=[req.user.company_id];
   if(req.user.role==="Employee"){q+=" AND e.id=? AND p.status='Finalized'";p.push(req.user.employee_id)}
-  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND e.reporting_manager_id=?";p.push(req.user.employee_id)}
+  else if(req.user.role==="Manager" && req.user.employee_id){q+=" AND EXISTS(SELECT 1 FROM employee_managers em WHERE em.employee_id=e.id AND em.manager_id=?)";p.push(req.user.employee_id)}
   q+=" ORDER BY p.id DESC";res.json(await db.prepare(q).all(...p));
 }));
 app.post("/api/performance",auth,requireCompany,roles("Super Admin","HR Admin","Manager"),wrap(async(req,res)=>{
@@ -2705,7 +2819,7 @@ async function sendTable(res,format,filename,columns,rows){
 const yn=v=>v?"Yes":"No";
 const HR_ROLES=["Super Admin","HR Admin","Director"];
 const teamFilter=(req,q,p,alias="e")=>{
-  if(req.user.role==="Manager"&&req.user.employee_id){q+=` AND (${alias}.reporting_manager_id=? OR ${alias}.id=?)`;p.push(req.user.employee_id,req.user.employee_id)}
+  if(req.user.role==="Manager"&&req.user.employee_id){q+=` AND (EXISTS(SELECT 1 FROM employee_managers em WHERE em.employee_id=${alias}.id AND em.manager_id=?) OR ${alias}.id=?)`;p.push(req.user.employee_id,req.user.employee_id)}
   return q;
 };
 const EXPORTS={
@@ -2736,7 +2850,7 @@ const EXPORTS={
   performance:{roles:[...HR_ROLES,"Manager"],
     columns:()=>[{header:"Employee Code",key:"employee_code"},{header:"Name",key:"name",width:26},{header:"Cycle",key:"cycle"},{header:"Rating (1-5)",key:"rating"},{header:"Status",key:"status"},{header:"Reviewer",key:"reviewer"},{header:"Goals / KRA",key:"goals",width:40},{header:"Manager Comments",key:"manager_comments",width:40}],
     query:req=>{let p=[req.user.company_id];let q="SELECT p.*,e.employee_code,e.name FROM performance p JOIN employees e ON e.id=p.employee_id WHERE p.company_id=?";
-      if(req.user.role==="Manager"&&req.user.employee_id){q+=" AND e.reporting_manager_id=?";p.push(req.user.employee_id)}return [q+" ORDER BY p.id DESC",p]}},
+      if(req.user.role==="Manager"&&req.user.employee_id){q+=" AND EXISTS(SELECT 1 FROM employee_managers em WHERE em.employee_id=e.id AND em.manager_id=?)";p.push(req.user.employee_id)}return [q+" ORDER BY p.id DESC",p]}},
   candidates:{roles:[...HR_ROLES,"Manager"],
     columns:()=>[{header:"Name",key:"name",width:26},{header:"Email",key:"email",width:28},{header:"Phone",key:"phone"},{header:"Position",key:"position",width:24},{header:"Status",key:"status"},{header:"Interview Date",key:"interview_date"},{header:"Notes",key:"notes",width:40}],
     query:req=>["SELECT * FROM candidates WHERE company_id=? ORDER BY id DESC",[req.user.company_id]]},

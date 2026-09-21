@@ -10,7 +10,7 @@ const pool = new Pool({
 });
 
 // Tables whose primary key isn't `id` — never auto-append RETURNING id for these.
-const NO_ID_TABLES = ["sessions", "password_resets", "images", "leave_allotments", "loan_recoveries"];
+const NO_ID_TABLES = ["sessions", "password_resets", "images", "leave_allotments", "loan_recoveries", "employee_managers"];
 
 function toPgSql(sql) {
   let text = sql.trim();

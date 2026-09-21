@@ -231,7 +231,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div id="empForm" class="panel" style="display:none"><h3>Employee details</h3><div class="grid">
 <div class="field"><label>Employee Code</label><input id="ec"></div><div class="field"><label>Name</label><input id="en"></div><div class="field"><label>Email</label><input id="ee"></div>
 <div class="field"><label>Phone</label><input id="ep"></div><div class="field"><label>Department</label><input id="ed"></div><div class="field"><label>Designation</label><input id="eg"></div>
-<div class="field"><label>Reporting Manager</label><input id="em" list="empDL" placeholder="Type manager's name/code"></div><div class="field"><label>Branch</label><input id="eb"></div><div class="field"><label>Joining Date</label><input id="ej" type="date"></div>
+<div class="field"><label>Reporting managers (up to 4)</label><input id="em" list="empDL" placeholder="Manager 1 (main)"><input id="em2" list="empDL" placeholder="Manager 2 (optional)" style="margin-top:6px"><input id="em3" list="empDL" placeholder="Manager 3 (optional)" style="margin-top:6px"><input id="em4" list="empDL" placeholder="Manager 4 (optional)" style="margin-top:6px"></div><div class="field"><label>Branch</label><input id="eb"></div><div class="field"><label>Joining Date</label><input id="ej" type="date"></div>
 <div class="field"><label>Date of Birth</label><input id="edob" type="date"></div><div class="field"><label>Biometric ID</label><input id="ebi"></div><div class="field"><label>Status</label><select id="est"><option>Active</option><option>Inactive</option></select></div>
 </div>
 <h3 style="margin-top:18px">Bank Details</h3><div class="grid">
@@ -272,7 +272,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 
 <section id="payroll" class="page"><div class="pagehead"><h2>Payroll</h2></div>
 <div id="payBulkPanel" class="panel" style="display:none"><h3>Run payroll for the whole company</h3><div class="grid" style="grid-template-columns:1fr 1fr"><input id="pbMonth" type="month"><button onclick="runMonthPayroll()">Run Payroll for Month</button></div><p class="small">Auto-calculates gross, LOP (from attendance/unpaid leave), PF and ESIC for every active employee who doesn't already have payroll for that month, and emails each payslip.</p></div>
-<div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code" onchange="autoCalcPayroll()"></div><div><label>Month</label><input id="pem" type="month" onchange="autoCalcPayroll()"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Other deductions (manual)</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>LOP Days</label><input id="peld" type="number" readonly style="background:#f1f5f9"></div><div><label>PF (Employee)</label><input id="pepf" type="number"></div><div><label>ESIC (Employee)</label><input id="pees" type="number"></div><div><label>TDS</label><input id="petds" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div><div><label>Other earnings (manual)</label><input id="pex" type="number"></div><div><label>Other earnings label</label><input id="pexl" placeholder="e.g. Bonus, Incentive"></div><div><label>Other deductions label</label><input id="pedl" placeholder="e.g. Fine, Damage"></div><div><label>Loan / advance recovery (auto)</label><input id="peloan" type="number" readonly style="background:#f1f5f9"></div></div><div class="actions"><button class="outline" onclick="autoCalcPayroll()">Auto-Calculate</button><button onclick="savePayroll()">Process Payroll</button></div></div>
+<div id="payForm" class="panel" style="display:none"><div class="grid"><div class="field"><label>Employee</label><input id="pei" list="empDL" placeholder="Type name or code" onchange="autoCalcPayroll()"></div><div><label>Month</label><input id="pem" type="month" onchange="autoCalcPayroll()"></div><div><label>Gross</label><input id="peg" type="number"></div><div><label>Other deductions (manual)</label><input id="ped" type="number"></div><div><label>LOP</label><input id="pel" type="number"></div><div><label>LOP Days</label><input id="peld" type="number" readonly style="background:#f1f5f9"></div><div><label>PF (Employee)</label><input id="pepf" type="number"></div><div><label>ESIC (Employee)</label><input id="pees" type="number"></div><div><label>TDS</label><input id="petds" type="number"></div><div><label>Overtime</label><input id="peo" type="number"></div><div><label>Other earnings (manual)</label><input id="pex" type="number"></div><div><label>Other earnings label</label><input id="pexl" placeholder="e.g. Bonus, Incentive"></div><div><label>Other deductions label</label><input id="pedl" placeholder="e.g. Fine, Damage"></div><div><label>Loan / advance recovery (auto)</label><input id="peloan" type="number" readonly style="background:#f1f5f9"></div><div><label>Late / early penalty (auto, editable)</label><input id="pepen" type="number"></div><div><label>Late / early count</label><input id="pepenc" readonly style="background:#f1f5f9"></div></div><div class="actions"><button class="outline" onclick="autoCalcPayroll()">Auto-Calculate</button><button onclick="savePayroll()">Process Payroll</button></div></div>
 <div class="searchbar"><input id="paySearch" placeholder="Search employee / month..." oninput="renderPayroll()"></div>
 <div id="payPaidPanel" class="panel" style="display:none"><h3>Mark the whole month as paid</h3><div class="grid" style="grid-template-columns:1fr 1fr 1fr auto"><input id="ppMonth" type="month"><input id="ppUtr" placeholder="Bank UTR / reference"><input id="ppDate" type="date"><button onclick="markMonthPaid()">Mark paid and email</button></div><p class="small">Use this when one bank batch paid everyone. Every processed payslip of the month gets this UTR and the employee is emailed a payslip with the payment details. For individual UTRs use <b>Mark paid</b> on each row.</p></div>
 <div id="payTable" class="tblwrap"></div></section>
@@ -386,7 +386,12 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap"><div id="lhPrevBox" style="width:120px;height:170px;border:1px solid #e5e7eb;border-radius:6px;background:#f8fafc;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:12px;color:#94a3b8"><img id="lhPrev" style="display:none;width:100%;height:100%;object-fit:contain"><span id="lhNone">No letterhead</span></div>
 <div><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Top margin (points)</label><input id="lhTop" type="number" min="20" max="400"></div><div class="field"><label>Bottom margin (points)</label><input id="lhBottom" type="number" min="20" max="400"></div></div>
 <div class="actions"><button class="gray" onclick="chooseLetterhead()">Upload letterhead</button><button onclick="saveLetterhead()">Save margins</button><button class="gray" onclick="removeLetterhead()">Remove</button></div><p class="small" style="margin-top:6px">A4 page is 842 points tall. 72 points = 1 inch.</p></div></div></div>
-<div class="panel"><h3>Working hours</h3><p class="small" style="margin-bottom:10px">Company default. Late marks, worked hours and overtime are calculated from these. Individual employees can have their own timing from the Employees page.</p><div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div class="field"><label>Start time</label><input id="wtStart" type="time"></div><div class="field"><label>Close time</label><input id="wtEnd" type="time"></div><div class="field"><label>Grace (minutes)</label><input id="wtGrace" type="number" min="0" max="120"></div></div><label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="wtBreakOn" onchange="$('wtBreakRow').style.display=this.checked?'grid':'none'"> Deduct break time</label><div class="grid" id="wtBreakRow" style="grid-template-columns:1fr 1fr"><div class="field"><label>Break start</label><input id="wtBs" type="time"></div><div class="field"><label>Break end</label><input id="wtBe" type="time"></div></div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><div class="field"><label>Minimum working hours per day</label><input id="wtMin" type="number" step="0.5" min="0" max="16"></div></div><div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin:6px 0"><div class="small" style="font-weight:700;margin-bottom:6px">Overtime</div><label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtOt"> Count overtime after the shift close time</label><div class="field" style="max-width:260px"><label>Count only if it is at least (minutes)</label><input id="wtOtMin" type="number" min="0" max="240"></div></div>
+<div class="panel"><h3>Working hours</h3><p class="small" style="margin-bottom:10px">Company default. Late marks, worked hours and overtime are calculated from these. Individual employees can have their own timing from the Employees page.</p><div class="grid" style="grid-template-columns:1fr 1fr 1fr"><div class="field"><label>Start time</label><input id="wtStart" type="time"></div><div class="field"><label>Close time</label><input id="wtEnd" type="time"></div><div class="field"><label>Grace (minutes)</label><input id="wtGrace" type="number" min="0" max="120"></div></div><label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="wtBreakOn" onchange="$('wtBreakRow').style.display=this.checked?'grid':'none'"> Deduct break time</label><div class="grid" id="wtBreakRow" style="grid-template-columns:1fr 1fr"><div class="field"><label>Break start</label><input id="wtBs" type="time"></div><div class="field"><label>Break end</label><input id="wtBe" type="time"></div></div><div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px"><div class="field"><label>Minimum working hours per day</label><input id="wtMin" type="number" step="0.5" min="0" max="16"></div></div><div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin:6px 0"><div class="small" style="font-weight:700;margin-bottom:6px">Late arrival and early leaving policy</div>
+<p class="small" style="margin-bottom:8px">Each employee gets a number of free late arrivals and free early exits per month. Every extra one deducts the salary of the days you set below (0 = no deduction). The deduction is applied automatically when payroll is processed.</p>
+<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr"><div class="field"><label>Free late arrivals / month</label><input id="wtLateFree" type="number" min="0" max="31"></div><div class="field"><label>Deduction per extra late (days)</label><input id="wtLatePen" type="number" step="0.5" min="0" max="3"></div><div class="field"><label>Free early exits / month</label><input id="wtEarlyFree" type="number" min="0" max="31"></div><div class="field"><label>Deduction per extra early exit (days)</label><input id="wtEarlyPen" type="number" step="0.5" min="0" max="3"></div></div>
+<div class="grid" style="grid-template-columns:1fr 1fr 1fr 1fr"><div class="field"><label>Leaving before close counts as early after (min)</label><input id="wtEarlyGrace" type="number" min="0" max="240"></div><div class="field"><label>Notify early check-in beyond (min, 0 = off)</label><input id="wtEarlyIn" type="number" min="0" max="600"></div><div class="field"><label>Lunch break allowed (min)</label><input id="wtLunch" type="number" min="0" max="240"></div><div class="field"><label>Tea break allowed (min)</label><input id="wtTea" type="number" min="0" max="120"></div></div>
+<label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtNEarly"> Email HR and the reporting managers about early and late check-in and check-out</label></div>
+<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin:6px 0"><div class="small" style="font-weight:700;margin-bottom:6px">Overtime</div><label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtOt"> Count overtime after the shift close time</label><div class="field" style="max-width:260px"><label>Count only if it is at least (minutes)</label><input id="wtOtMin" type="number" min="0" max="240"></div></div>
 <label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtWeb"> Allow employees to Clock In / Clock Out from the portal</label><div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin:6px 0"><div class="small" style="font-weight:700;margin-bottom:6px">Clock In / Out location</div>
 <label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtReqLoc"> Require the employee's location when clocking in or out</label>
 <label style="display:flex;gap:8px;align-items:center;margin:4px 0"><input type="checkbox" id="wtRemote"> Allow clocking in from outside the office (remote work)</label>
@@ -948,7 +953,7 @@ async function applyBranding(){
 
 /* ---------- Employees ---------- */
 function showEmpForm(){resetEmpForm();$("empForm").style.display="block"}
-function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","eb","ej","edob","ebi","ebn","eba","eifsc","euan","eesic","epan","ebasic","ehra","eoa"].forEach(id=>$(id).value="");$("est").value="Active";$("epfapp").checked=false;$("eesicapp").checked=false;$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee";if($("egross"))$("egross").value="";recalcSalary()}
+function resetEmpForm(){["ec","en","ee","ep","ed","eg","em","em2","em3","em4","eb","ej","edob","ebi","ebn","eba","eifsc","euan","eesic","epan","ebasic","ehra","eoa"].forEach(id=>$(id).value="");$("est").value="Active";$("epfapp").checked=false;$("eesicapp").checked=false;$("editEmpId").value="";$("empSaveBtn").textContent="Save Employee";if($("egross"))$("egross").value="";recalcSalary()}
 function changeEmpPhoto(id,self){pickImage(256,async d=>{try{await api(`/api/images/employee/${id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:d})});IMG_V=Date.now();await uiAlert("The photo has been updated.");if(self)refreshMe().then(()=>{}).catch(()=>{});else renderEmployees()}catch(e){uiAlert(e.message)}})}
 function empAvatar(e){return `<span class="empav">${esc((e.name||"?").slice(0,1).toUpperCase())}<img src="/api/images/employee/${e.id}?v=${IMG_V}" onerror="this.remove()" alt=""></span>`}
 function recalcSalary(fromGross){
@@ -963,7 +968,7 @@ function editEmployee(id){
   const e=EMP.find(x=>x.id===id);if(!e)return;
   $("ec").value=e.employee_code||"";$("en").value=e.name||"";$("ee").value=e.email||"";$("ep").value=e.phone||"";
   $("ed").value=e.department||"";$("eg").value=e.designation||"";$("eb").value=e.branch||"";
-  setEmpInput("em",e.reporting_manager_id);
+  ["em","em2","em3","em4"].forEach((id,i)=>setEmpInput(id,(e.manager_ids||[])[i]));
   $("ej").value=e.joining_date||"";$("edob").value=e.date_of_birth||"";$("ebi").value=e.biometric_id||"";$("est").value=e.status||"Active";
   $("ebn").value=e.bank_name||"";$("eba").value=e.bank_account||"";$("eifsc").value=e.ifsc||"";
   $("euan").value=e.uan_number||"";$("eesic").value=e.esic_number||"";$("epan").value=e.pan_number||"";
@@ -973,9 +978,10 @@ function editEmployee(id){
   $("empForm").style.display="block";$("empForm").scrollIntoView({behavior:"smooth"});
 }
 async function saveEmployee(){
-  const rmId=$("em").value?resolveEmp("em"):null;
+  const mgrIds=["em","em2","em3","em4"].map(id=>$(id).value?resolveEmp(id):null).filter(Boolean);
+  const rmId=mgrIds[0]||null;
   const rmName=rmId?EMP.find(x=>x.id===rmId)?.name:"";
-  const body={employee_code:$("ec").value,name:$("en").value,email:$("ee").value,phone:$("ep").value,department:$("ed").value,designation:$("eg").value,manager:rmName,reporting_manager_id:rmId,branch:$("eb").value,joining_date:$("ej").value,date_of_birth:$("edob").value,biometric_id:$("ebi").value,status:$("est").value,bank_name:$("ebn").value,bank_account:$("eba").value,ifsc:$("eifsc").value,
+  const body={employee_code:$("ec").value,name:$("en").value,email:$("ee").value,phone:$("ep").value,department:$("ed").value,designation:$("eg").value,manager:rmName,reporting_manager_id:rmId,manager_ids:mgrIds,branch:$("eb").value,joining_date:$("ej").value,date_of_birth:$("edob").value,biometric_id:$("ebi").value,status:$("est").value,bank_name:$("ebn").value,bank_account:$("eba").value,ifsc:$("eifsc").value,
     uan_number:$("euan").value,esic_number:$("eesic").value,pan_number:$("epan").value,pf_applicable:$("epfapp").checked,esic_applicable:$("eesicapp").checked,
     basic_salary:$("ebasic").value,hra:$("ehra").value,other_allowances:$("eoa").value,salary:(+$("ebasic").value||0)+(+$("ehra").value||0)+(+$("eoa").value||0)};
   const editId=$("editEmpId").value;
@@ -1027,8 +1033,14 @@ async function loadClock(){
     const t=v=>v?v.slice(11,16):"-";
     const state=!c.first_in?"You have not clocked in today.":!c.last_out?`Clocked in at <b>${t(c.first_in)}</b>.`:`Clocked in <b>${t(c.first_in)}</b>, last clock out <b>${t(c.last_out)}</b>.`;
     box.style.display="block";
-    box.innerHTML=`<h3>Today</h3><p class="small" style="margin-bottom:10px">${state}</p><div class="actions"><button ${c.first_in?"disabled":""} onclick="doClock('in')">Clock In</button><button class="gray" ${!c.first_in?"disabled":""} onclick="doClock('out')">Clock Out</button></div>`;
+    const ob=c.open_break,working=c.first_in&&!c.last_out;
+    const brk=working?(ob?`<button class="outline" onclick="doBreak('end')">End ${esc(ob.kind.toLowerCase())} break</button><span class="small">${esc(ob.kind)} break running since ${t(ob.start_at)}</span>`:`<button class="gray" onclick="doBreak('start','Lunch')">Start lunch break</button><button class="gray" onclick="doBreak('start','Tea')">Start tea break</button>`):"";
+    const used=c.first_in?`<p class="small" style="margin-top:8px">Lunch ${c.lunch_minutes} of ${c.lunch_limit} min &middot; Tea ${c.tea_minutes} of ${c.tea_limit} min</p>`:"";
+    box.innerHTML=`<h3>Today</h3><p class="small" style="margin-bottom:10px">${state}</p><div class="actions"><button ${c.first_in?"disabled":""} onclick="doClock('in')">Clock In</button><button class="gray" ${!c.first_in||c.last_out?"disabled":""} onclick="doClock('out')">Clock Out</button>${brk}</div>${used}`;
   }catch(e){box.style.display="none"}
+}
+async function doBreak(action,kind){
+  try{await api("/api/attendance/break",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,kind})});loadClock()}catch(e){uiAlert(e.message)}
 }
 async function doClock(a){
   try{
@@ -1051,7 +1063,7 @@ function renderAttendance(){
   if(from)rows=rows.filter(a=>a.work_date>=from);
   if(to)rows=rows.filter(a=>a.work_date<=to);
   const hm=m=>m?Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m":"-";
-  table("attTable",["Date","Employee","Dept","First In","Last Out","Location","Late","Worked","Overtime","Status","Source"],rows.map(a=>[a.work_date,esc(a.employee_code+" - "+a.name),esc(a.department),a.first_in||"-",a.last_out||"-",locCell(a),a.late_minutes?a.late_minutes+" min":"-",(a.last_out&&a.worked_minutes<a.min_minutes?`<span class="badge bad">${hm(a.worked_minutes)}</span>`:hm(a.worked_minutes)),hm(a.overtime_minutes),statusBadge(a.status),a.source]));
+  table("attTable",["Date","Employee","Dept","First In","Last Out","Location","Late","Early out","Break","Worked","Overtime","Status","Source"],rows.map(a=>[a.work_date,esc(a.employee_code+" - "+a.name),esc(a.department),a.first_in||"-",a.last_out||"-",locCell(a),a.late_minutes?a.late_minutes+" min":"-",a.early_minutes?`<span class="badge warn">${a.early_minutes} min</span>`:"-",a.break_minutes?a.break_minutes+" min":"-",(a.last_out&&a.worked_minutes<a.min_minutes?`<span class="badge bad">${hm(a.worked_minutes)}</span>`:hm(a.worked_minutes)),hm(a.overtime_minutes),statusBadge(a.status),a.source]));
 }
 
 /* ---------- Leave ---------- */
@@ -1067,7 +1079,7 @@ async function loadLeaveBalance(){
   if(!eid && isMgrPlus()){$("leaveBalance").innerHTML=`<div class="small">Select an employee above to view balance after applying, or check Employees page.</div>`;return}
   try{
     const b=await api("/api/leaves/balance");
-    $("leaveBalance").innerHTML=b.map(x=>`<div class="card"><div class="bar"></div><div class="lbl">${esc(x.leave_type)}${x.custom?' <span class="chip">Personal</span>':""}</div><div class="num">${x.eligible?x.remaining:"-"}</div><div class="small">${x.eligible?`of ${x.annual_balance} (used ${x.used})`:`Available from ${new Date(x.available_from).toLocaleDateString("en-IN")} (${x.eligible_after_months} month(s) after joining)`}</div></div>`).join("");
+    $("leaveBalance").innerHTML=b.map(x=>`<div class="card"><div class="bar"></div><div class="lbl">${esc(x.leave_type)}${x.custom?' <span class="chip">Personal</span>':""}</div><div class="num">${x.eligible?x.remaining:"-"}</div><div class="small">${x.eligible?`of ${x.annual_balance} (used ${x.used})`:`Available from ${new Date(x.available_from).toLocaleDateString("en-IN")} (${x.eligible_after_months} month(s) after joining)`}${x.min_notice_days?`<div class="small">Apply at least ${x.min_notice_days} day(s) before</div>`:""}</div></div>`).join("");
   }catch(e){}
 }
 async function renderLeavePolicy(){
@@ -1075,15 +1087,15 @@ async function renderLeavePolicy(){
   try{
     const [types,allot]=await Promise.all([api("/api/leave-types"),api("/api/leave-allotments")]);
     box.innerHTML=`<h3>Leave policy</h3><p class="small" style="margin-bottom:8px">Set how many days each leave type gives per year, and after how many months from the joining date an employee can use it (0 means from day one). Use the last section to give one employee a different number of days.</p>
-    <div class="tblwrap"><table><thead><tr><th>Leave type</th><th>Days per year</th><th>Applicable after (months)</th><th></th></tr></thead><tbody>`+
-    types.map(t=>`<tr><td><input id="lt_n_${t.id}" value="${esc(t.name)}"></td><td><input id="lt_d_${t.id}" type="number" min="0" max="365" step="0.5" value="${t.annual_balance}" style="width:90px"></td><td><input id="lt_m_${t.id}" type="number" min="0" max="60" value="${t.eligible_after_months}" style="width:90px"></td><td><div class="actions"><button class="sm" onclick="saveLeaveType(${t.id})">Save</button><button class="sm red" onclick="deleteLeaveType(${t.id})">Delete</button></div></td></tr>`).join("")+
-    `<tr><td><input id="lt_n_0" placeholder="New leave type, e.g. EL - Earned Leave"></td><td><input id="lt_d_0" type="number" min="0" max="365" step="0.5" value="0" style="width:90px"></td><td><input id="lt_m_0" type="number" min="0" max="60" value="0" style="width:90px"></td><td><button class="sm" onclick="saveLeaveType(0)">Add</button></td></tr></tbody></table></div>
+    <div class="tblwrap"><table><thead><tr><th>Leave type</th><th>Days per year</th><th>Applicable after (months)</th><th>Apply at least (days before)</th><th></th></tr></thead><tbody>`+
+    types.map(t=>`<tr><td><input id="lt_n_${t.id}" value="${esc(t.name)}"></td><td><input id="lt_d_${t.id}" type="number" min="0" max="365" step="0.5" value="${t.annual_balance}" style="width:90px"></td><td><input id="lt_m_${t.id}" type="number" min="0" max="60" value="${t.eligible_after_months}" style="width:90px"></td><td><input id="lt_x_${t.id}" type="number" min="0" max="30" value="${t.min_notice_days}" style="width:90px"></td><td><div class="actions"><button class="sm" onclick="saveLeaveType(${t.id})">Save</button><button class="sm red" onclick="deleteLeaveType(${t.id})">Delete</button></div></td></tr>`).join("")+
+    `<tr><td><input id="lt_n_0" placeholder="New leave type, e.g. EL - Earned Leave"></td><td><input id="lt_d_0" type="number" min="0" max="365" step="0.5" value="0" style="width:90px"></td><td><input id="lt_m_0" type="number" min="0" max="60" value="0" style="width:90px"></td><td><input id="lt_x_0" type="number" min="0" max="30" value="0" style="width:90px"></td><td><button class="sm" onclick="saveLeaveType(0)">Add</button></td></tr></tbody></table></div>
     <h3 style="margin-top:18px">Give one employee a different allotment</h3><div class="grid" style="grid-template-columns:2fr 2fr 1fr auto"><input id="laEmp" list="empDL" placeholder="Employee name or code"><select id="laType">${types.map(t=>`<option>${esc(t.name)}</option>`).join("")}</select><input id="laDays" type="number" step="0.5" min="0" placeholder="Days"><button onclick="saveAllotment()">Set</button></div><p class="small">Leave the days empty and press Set to remove a personal allotment.</p>`+
     (allot.length?`<div class="tblwrap" style="margin-top:8px"><table><thead><tr><th>Employee</th><th>Leave type</th><th>Days</th></tr></thead><tbody>${allot.map(a=>`<tr><td>${esc(a.employee_code+" - "+a.name)}</td><td>${esc(a.leave_type)}</td><td>${a.days}</td></tr>`).join("")}</tbody></table></div>`:"");
   }catch(e){}
 }
 async function saveLeaveType(id){
-  const body={name:$("lt_n_"+id).value,annual_balance:$("lt_d_"+id).value,eligible_after_months:$("lt_m_"+id).value};if(id)body.id=id;
+  const body={name:$("lt_n_"+id).value,annual_balance:$("lt_d_"+id).value,eligible_after_months:$("lt_m_"+id).value,min_notice_days:$("lt_x_"+id).value};if(id)body.id=id;
   try{await api("/api/leave-types",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await uiAlert("The leave policy has been saved.","ok");loadPage("leave")}catch(e){uiAlert(e.message)}
 }
 async function deleteLeaveType(id){
@@ -1096,8 +1108,8 @@ async function saveAllotment(){
 }
 function onLeaveCatChange(){$("letWrap").style.display=$("lecat").value==="Leave"?"":"none"}
 async function applyLeave(){
-  const eid=isMgrPlus()?resolveEmp("leid"):ME.employee_id;
-  if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
+  const eid=isMgrPlus()?(resolveEmp("leid")||ME.employee_id):ME.employee_id;
+  if(!eid)return alert("Please select a valid employee from the list.");
   const category=$("lecat").value;
   const leave_type=category==="Leave"?$("let").value:category;
   try{await api("/api/leaves",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,leave_type,category,days:$("led").value,from_date:$("lef").value,to_date:$("letd").value,reason:$("ler").value})});alert("Your request has been submitted.");$("leid").value="";loadPage("leave")}catch(e){alert(e.message)}
@@ -1121,12 +1133,12 @@ async function autoCalcPayroll(){
   if(!eid||!month)return;
   try{
     const c=await api(`/api/payroll/calculate?employee_id=${eid}&month=${month}`);
-    $("peg").value=c.gross;$("pel").value=c.lop;$("peld").value=c.lopDays;$("pepf").value=c.pfEmployee;$("pees").value=c.esicEmployee;$("peloan").value=c.loanDeduction||0;
+    $("peg").value=c.gross;$("pel").value=c.lop;$("peld").value=c.lopDays;$("pepf").value=c.pfEmployee;$("pees").value=c.esicEmployee;$("peloan").value=c.loanDeduction||0;$("pepen").value=c.penaltyAmount||0;$("pepenc").value=`${c.lateCount||0} late, ${c.earlyCount||0} early (${c.penaltyDays||0} day(s) deducted)`;
   }catch(e){alert(e.message)}
 }
 async function savePayroll(){
   const eid=resolveEmp("pei");if(!eid)return alert("Please select a valid employee from the list.");
-  try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,pf_employee:$("pepf").value,esic_employee:$("pees").value,tds:$("petds").value,ot:$("peo").value,other_earnings:$("pex").value,other_earn_label:$("pexl").value,ded_label:$("pedl").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
+  try{const d=await api("/api/payroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,month:$("pem").value,gross:$("peg").value,deductions:$("ped").value,lop:$("pel").value,pf_employee:$("pepf").value,esic_employee:$("pees").value,tds:$("petds").value,ot:$("peo").value,penalty_amount:$("pepen").value,other_earnings:$("pex").value,other_earn_label:$("pexl").value,ded_label:$("pedl").value})});alert("Payroll processed. Net ₹"+d.net);loadPage("payroll")}catch(e){alert(e.message)}
 }
 async function runMonthPayroll(){
   const month=$("pbMonth").value;if(!month)return alert("Please select a month.");
@@ -1145,6 +1157,7 @@ function printPayslip(row){
   <tr><th>TDS</th><td>₹${Number(row.tds||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>Overtime</th><td>₹${Number(row.ot).toLocaleString("en-IN")}</td></tr>
   <tr><th>Other earnings${row.other_earn_label?" ("+esc(row.other_earn_label)+")":""}</th><td>₹${Number(row.other_earnings||0).toLocaleString("en-IN")}</td></tr>
+  <tr><th>Late / early penalty (${Number(row.penalty_days||0)} day(s))</th><td>₹${Number(row.penalty_amount||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>Loan / advance recovery</th><td>₹${Number(row.loan_deduction||0).toLocaleString("en-IN")}</td></tr>
   <tr><th>Net Pay</th><td><b>₹${Number(row.net).toLocaleString("en-IN")}</b></td></tr>
   <tr><th>Status</th><td>${esc(row.status)}</td></tr></table>`;
@@ -1542,8 +1555,8 @@ function addExpLine(){
 }
 function removeExpLine(b){if(document.querySelectorAll("#expLines .expline").length>1)b.closest(".expline").remove()}
 async function submitExpenses(){
-  const eid=isMgrPlus()?resolveEmp("exei"):ME.employee_id;
-  if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
+  const eid=isMgrPlus()?(resolveEmp("exei")||ME.employee_id):ME.employee_id;
+  if(!eid)return alert("Please select a valid employee from the list.");
   const kind=$("exkind").value,items=[];
   for(const d of document.querySelectorAll("#expLines .expline")){
     const it={amount:d.querySelector(".x-amt").value,expense_date:d.querySelector(".x-date").value,description:d.querySelector(".x-desc").value};
@@ -1611,8 +1624,8 @@ async function addAnnouncement(){try{await api("/api/announcements",{method:"POS
 
 /* ---------- Tickets ---------- */
 async function addTicket(){
-  const eid=isMgrPlus()?resolveEmp("tei"):ME.employee_id;
-  if(isMgrPlus() && !eid)return alert("Please select a valid employee from the list.");
+  const eid=isMgrPlus()?(resolveEmp("tei")||ME.employee_id):ME.employee_id;
+  if(!eid)return alert("Please select a valid employee from the list.");
   try{await api("/api/tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({employee_id:eid,subject:$("tes").value,priority:$("tep").value,description:$("ted").value})});alert("Ticket created");$("tei").value="";loadPage("tickets")}catch(e){alert(e.message)}
 }
 async function ticketStatus(id,status){try{await api(`/api/tickets/${id}/status`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});loadPage("tickets")}catch(e){alert(e.message)}}
@@ -1796,11 +1809,11 @@ async function loadWorkTiming(){
     const t=await api("/api/work-timing");
     $("wtStart").value=t.start;$("wtEnd").value=t.end;$("wtGrace").value=t.grace;$("wtBreakOn").checked=!!t.break_on;$("wtBs").value=t.break_start;$("wtBe").value=t.break_end;
     $("wtBreakRow").style.display=t.break_on?"grid":"none";
-    $("wtOt").checked=!!t.ot_enabled;$("wtOtMin").value=t.ot_min_minutes;$("wtWeb").checked=!!t.web_clock;$("wtReqLoc").checked=!!t.require_location;$("wtRemote").checked=!!t.allow_remote;$("wtLat").value=t.office_lat??"";$("wtLng").value=t.office_lng??"";$("wtRad").value=t.office_radius||200;$("wtMin").value=t.min_hours;$("wtNLow").checked=!!t.notify_low_hours;$("wtNLate").checked=!!t.notify_late;
+    $("wtLateFree").value=t.late_free;$("wtLatePen").value=t.late_penalty_days;$("wtEarlyFree").value=t.early_free;$("wtEarlyPen").value=t.early_penalty_days;$("wtEarlyGrace").value=t.early_grace;$("wtEarlyIn").value=t.early_in_notify;$("wtLunch").value=t.lunch_minutes;$("wtTea").value=t.tea_minutes;$("wtNEarly").checked=t.notify_early!==false;$("wtOt").checked=!!t.ot_enabled;$("wtOtMin").value=t.ot_min_minutes;$("wtWeb").checked=!!t.web_clock;$("wtReqLoc").checked=!!t.require_location;$("wtRemote").checked=!!t.allow_remote;$("wtLat").value=t.office_lat??"";$("wtLng").value=t.office_lng??"";$("wtRad").value=t.office_radius||200;$("wtMin").value=t.min_hours;$("wtNLow").checked=!!t.notify_low_hours;$("wtNLate").checked=!!t.notify_late;
   }catch(e){}
 }
 async function saveWorkTiming(){
-  try{await api("/api/work-timing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({start:$("wtStart").value,end:$("wtEnd").value,grace:$("wtGrace").value,break_on:$("wtBreakOn").checked,break_start:$("wtBs").value,break_end:$("wtBe").value,ot_enabled:$("wtOt").checked,ot_min_minutes:$("wtOtMin").value,web_clock:$("wtWeb").checked,require_location:$("wtReqLoc").checked,allow_remote:$("wtRemote").checked,office_lat:$("wtLat").value,office_lng:$("wtLng").value,office_radius:$("wtRad").value,min_hours:$("wtMin").value,notify_low_hours:$("wtNLow").checked,notify_late:$("wtNLate").checked})});alert("Working hours have been saved.")}catch(e){alert(e.message)}
+  try{await api("/api/work-timing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({start:$("wtStart").value,end:$("wtEnd").value,grace:$("wtGrace").value,break_on:$("wtBreakOn").checked,break_start:$("wtBs").value,break_end:$("wtBe").value,late_free:$("wtLateFree").value,late_penalty_days:$("wtLatePen").value,early_free:$("wtEarlyFree").value,early_penalty_days:$("wtEarlyPen").value,early_grace:$("wtEarlyGrace").value,early_in_notify:$("wtEarlyIn").value,lunch_minutes:$("wtLunch").value,tea_minutes:$("wtTea").value,notify_early:$("wtNEarly").checked,ot_enabled:$("wtOt").checked,ot_min_minutes:$("wtOtMin").value,web_clock:$("wtWeb").checked,require_location:$("wtReqLoc").checked,allow_remote:$("wtRemote").checked,office_lat:$("wtLat").value,office_lng:$("wtLng").value,office_radius:$("wtRad").value,min_hours:$("wtMin").value,notify_low_hours:$("wtNLow").checked,notify_late:$("wtNLate").checked})});alert("Working hours have been saved.")}catch(e){alert(e.message)}
 }
 function getPos(){return new Promise((res,rej)=>{if(!navigator.geolocation)return rej(new Error("This browser does not support location"));navigator.geolocation.getCurrentPosition(p=>res(p.coords),e=>rej(new Error(e.code===1?"Location permission was denied":"Could not get your location")),{enableHighAccuracy:true,timeout:15000,maximumAge:0})})}
 async function useMyLocationAsOffice(){try{const c=await getPos();$("wtLat").value=c.latitude.toFixed(6);$("wtLng").value=c.longitude.toFixed(6);if(!$("wtRad").value)$("wtRad").value=200;uiAlert("Office location filled in. Click Save working hours to keep it.")}catch(e){uiAlert(e.message)}}
