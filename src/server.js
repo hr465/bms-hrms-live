@@ -88,6 +88,12 @@ CREATE TABLE IF NOT EXISTS employee_managers(
 CREATE TABLE IF NOT EXISTS attendance_breaks(
  id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,employee_id INTEGER NOT NULL,work_date TEXT,kind TEXT,start_at TEXT,end_at TEXT
 );
+CREATE TABLE IF NOT EXISTS letter_templates(
+ company_id INTEGER NOT NULL,type TEXT NOT NULL,content TEXT,PRIMARY KEY(company_id,type)
+);
+CREATE TABLE IF NOT EXISTS asset_history(
+ id SERIAL PRIMARY KEY,company_id INTEGER NOT NULL,asset_id INTEGER,employee_id INTEGER,action TEXT,on_date TEXT,condition TEXT,note TEXT,by_user TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS punches(
  id SERIAL PRIMARY KEY,company_id INTEGER,biometric_id TEXT,punch_time TEXT,punch_type TEXT,device_id INTEGER,raw_payload TEXT,
  UNIQUE(company_id,biometric_id,punch_time)
@@ -171,6 +177,8 @@ for(const col of ["offer_template TEXT","letterhead_top INTEGER","letterhead_bot
 }
 try{await db.exec("ALTER TABLE employees ADD COLUMN work_timing TEXT")}catch(e){}
 try{await db.exec("ALTER TABLE users ADD COLUMN full_name TEXT")}catch(e){}
+for(const col of ["kind TEXT DEFAULT 'Resignation'","stage TEXT DEFAULT 'HR Review'","hr_note TEXT","hr_by TEXT","hr_at TEXT","director_status TEXT DEFAULT 'Pending'","director_note TEXT","director_by TEXT","director_at TEXT","approved_lwd TEXT","clearance_note TEXT","clearance_at TEXT","fnf_amount REAL","fnf_breakdown TEXT","fnf_utr TEXT","fnf_paid_on TEXT","certs_at TEXT"]){try{await db.exec(`ALTER TABLE exit_requests ADD COLUMN ${col}`)}catch(e){}}
+try{await db.exec("UPDATE exit_requests SET stage=CASE WHEN status='Rejected' THEN 'Rejected' WHEN status='Approved' AND fnf_status='Processed' THEN 'Completed' WHEN status='Approved' THEN 'Notice Period' ELSE 'HR Review' END WHERE stage='HR Review' AND status<>'Pending'")}catch(e){}
 try{await db.exec("ALTER TABLE leave_requests ADD COLUMN decision_reason TEXT")}catch(e){}
 try{await db.exec("ALTER TABLE leave_types ADD COLUMN eligible_after_months INTEGER DEFAULT 0")}catch(e){}
 try{await db.exec("ALTER TABLE leave_types ADD COLUMN min_notice_days INTEGER DEFAULT 0");await db.exec("UPDATE leave_types SET min_notice_days=2 WHERE name ILIKE 'PL%'")}catch(e){}
@@ -924,7 +932,7 @@ function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&l
 
 /* ---------------- Letters (appointment letter with PDF + email) ---------------- */
 const PDFDocument=require("pdfkit");
-const LETTER_PLACEHOLDERS=["employee_name","employee_code","designation","department","branch","reporting_manager","joining_date","monthly_ctc","annual_ctc","basic_monthly","hra_monthly","other_allowances_monthly","company_name","company_address","issue_date","ref_no"];
+const LETTER_PLACEHOLDERS=["last_working_date","resignation_date","tenure","purpose","effective_date","reason","employee_name","employee_code","designation","department","branch","reporting_manager","joining_date","monthly_ctc","annual_ctc","basic_monthly","hra_monthly","other_allowances_monthly","company_name","company_address","issue_date","ref_no"];
 const DEFAULT_LETTER_TEMPLATE=`Ref: {{ref_no}}
 Date: {{issue_date}}
 
@@ -1000,7 +1008,90 @@ For {{company_name}}
 Authorized Signatory`;
 const fmtDate=d=>{const x=new Date(d);return isNaN(x)?String(d||""):x.toLocaleDateString("en-GB",{day:"2-digit",month:"long",year:"numeric"})};
 const fmtNum=n=>Math.round(Number(n)||0).toLocaleString("en-IN");
+const DEFAULT_EXPERIENCE_TEMPLATE=`Ref: {{ref_no}}
+Date: {{issue_date}}
+
+# EXPERIENCE CERTIFICATE
+
+TO WHOMSOEVER IT MAY CONCERN
+
+This is to certify that {{employee_name}} (Employee Code: {{employee_code}}) worked with {{company_name}} as {{designation}} in the {{department}} department from {{joining_date}} to {{last_working_date}}, a period of {{tenure}}.
+
+During this period we found {{employee_name}} to be sincere, hardworking and dedicated to the assigned responsibilities. Conduct and character were good.
+
+We wish {{employee_name}} every success in future endeavours.
+
+For {{company_name}}
+
+
+Authorized Signatory`;
+const DEFAULT_RELIEVING_TEMPLATE=`Ref: {{ref_no}}
+Date: {{issue_date}}
+
+# RELIEVING LETTER
+
+To,
+{{employee_name}}
+Employee Code: {{employee_code}}
+
+Dear {{employee_name}},
+
+With reference to your resignation dated {{resignation_date}}, we confirm that you stand relieved from your duties as {{designation}} at {{company_name}} with effect from the close of working hours on {{last_working_date}}.
+
+You have handed over all company assets, documents and responsibilities, and your full and final settlement has been processed. You have no outstanding dues to the company.
+
+We thank you for your contribution and wish you the very best.
+
+For {{company_name}}
+
+
+Authorized Signatory`;
+const DEFAULT_NOC_TEMPLATE=`Ref: {{ref_no}}
+Date: {{issue_date}}
+
+# NO OBJECTION CERTIFICATE
+
+TO WHOMSOEVER IT MAY CONCERN
+
+This is to certify that {{employee_name}} (Employee Code: {{employee_code}}) is working with {{company_name}} as {{designation}} in the {{department}} department since {{joining_date}}.
+
+The company has no objection to {{employee_name}} for the following purpose: {{purpose}}.
+
+This certificate is issued on the request of the employee and does not release the employee from the duties and terms of employment.
+
+For {{company_name}}
+
+
+Authorized Signatory`;
+const DEFAULT_TERMINATION_TEMPLATE=`Ref: {{ref_no}}
+Date: {{issue_date}}
+
+# TERMINATION OF EMPLOYMENT
+
+To,
+{{employee_name}}
+Employee Code: {{employee_code}}
+Designation: {{designation}}
+
+Dear {{employee_name}},
+
+This is to inform you that your employment with {{company_name}} is terminated with effect from {{effective_date}} for the following reason:
+
+{{reason}}
+
+You are required to return all company assets and documents to the HR department and complete the exit formalities. Your full and final settlement will be processed as per company policy and applicable law.
+
+For {{company_name}}
+
+
+Authorized Signatory`;
+const DEFAULT_TEMPLATES={"Experience Certificate":DEFAULT_EXPERIENCE_TEMPLATE,"Relieving Letter":DEFAULT_RELIEVING_TEMPLATE,"NOC":DEFAULT_NOC_TEMPLATE,"Termination Letter":DEFAULT_TERMINATION_TEMPLATE};
+
 async function getLetterTemplate(companyId,type){
+  if(DEFAULT_TEMPLATES[type]){
+    const t=await db.prepare("SELECT content FROM letter_templates WHERE company_id=? AND type=?").get(companyId,type);
+    return (t?.content&&t.content.trim())?t.content:DEFAULT_TEMPLATES[type];
+  }
   if(type==="Offer Letter"){
     const c=await db.prepare("SELECT offer_template FROM companies WHERE id=?").get(companyId);
     return (c?.offer_template&&c.offer_template.trim())?c.offer_template:DEFAULT_OFFER_TEMPLATE;
@@ -1008,20 +1099,20 @@ async function getLetterTemplate(companyId,type){
   const c=await db.prepare("SELECT letter_template FROM companies WHERE id=?").get(companyId);
   return (c?.letter_template&&c.letter_template.trim())?c.letter_template:DEFAULT_LETTER_TEMPLATE;
 }
-async function buildLetter(companyId,emp,refNo,type="Appointment Letter"){
+async function buildLetter(companyId,emp,refNo,type="Appointment Letter",extra={}){
   const company=await db.prepare("SELECT id,name,code,address FROM companies WHERE id=?").get(companyId);
   const missing=[];
   if(!emp.designation)missing.push("designation");
   if(!emp.joining_date)missing.push("joining date");
   const basic=Number(emp.basic_salary)||0,hra=Number(emp.hra)||0,other=Number(emp.other_allowances)||0;
-  if(basic+hra+other<=0)missing.push("salary structure (Basic, HRA, Other Allowances)");
+  if(SIGN_TYPES.includes(type)&&basic+hra+other<=0)missing.push("salary structure (Basic, HRA, Other Allowances)");
   let manager="";
   if(emp.reporting_manager_id){const m=await db.prepare("SELECT name FROM employees WHERE id=?").get(emp.reporting_manager_id);manager=m?.name||""}
   const ctc=basic+hra+other;
   const values={employee_name:emp.name,employee_code:emp.employee_code,designation:emp.designation,department:emp.department,branch:emp.branch,
     reporting_manager:manager||emp.manager,joining_date:fmtDate(emp.joining_date),monthly_ctc:fmtNum(ctc),annual_ctc:fmtNum(ctc*12),
     basic_monthly:fmtNum(basic),hra_monthly:fmtNum(hra),other_allowances_monthly:fmtNum(other),company_name:company?.name,company_address:company?.address,
-    issue_date:fmtDate(new Date()),ref_no:refNo};
+    issue_date:fmtDate(new Date()),ref_no:refNo,...Object.fromEntries(Object.entries(extra||{}).filter(([,v])=>v!=null&&String(v).trim()!==""))};
   const tpl=await getLetterTemplate(companyId,type);
   const content=tpl.replace(/\{\{\s*(\w+)\s*\}\}/g,(m,k)=>{const v=values[k];return v==null||String(v).trim()===""?"-":String(v)});
   return {content,missing,company};
@@ -1160,7 +1251,7 @@ app.delete("/api/letterhead",auth,requireCompany,roles("Super Admin","HR Admin")
 async function nextRefNo(companyId,code,type="Appointment Letter"){
   const yr=new Date().getFullYear();
   const n=Number((await db.prepare("SELECT COUNT(*) c FROM letters WHERE company_id=? AND letter_type=? AND issued_at LIKE ?").get(companyId,type,yr+"%")).c)+1;
-  return `${type==="Offer Letter"?"OFR":"APT"}/${(code||"CO").toUpperCase()}/${yr}/${String(n).padStart(4,"0")}`;
+  return `${REF_PREFIX[type]||"DOC"}/${(code||"CO").toUpperCase()}/${yr}/${String(n).padStart(4,"0")}`;
 }
 async function emailLetter(companyId,emp,letter,pdf){
   if(!emp.email)return false;
@@ -1172,22 +1263,30 @@ async function emailLetter(companyId,emp,letter,pdf){
   return !!ok;
 }
 app.get("/api/letter-template",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
-  const type=req.query.type==="offer"?"Offer Letter":"Appointment Letter";
-  res.json({type,template:await getLetterTemplate(req.user.company_id,type),defaultTemplate:type==="Offer Letter"?DEFAULT_OFFER_TEMPLATE:DEFAULT_LETTER_TEMPLATE,placeholders:LETTER_PLACEHOLDERS});
+  const type=TYPE_KEY[req.query.type]||"Appointment Letter";
+  const def=DEFAULT_TEMPLATES[type]||(type==="Offer Letter"?DEFAULT_OFFER_TEMPLATE:DEFAULT_LETTER_TEMPLATE);
+  res.json({type,template:await getLetterTemplate(req.user.company_id,type),defaultTemplate:def,placeholders:LETTER_PLACEHOLDERS});
 }));
 app.post("/api/letter-template",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
-  const offer=req.body?.type==="offer";
+  const type=TYPE_KEY[req.body?.type]||"Appointment Letter";
   const t=String(req.body?.template||"").trim();
   if(!t)return res.status(400).json({error:"The letter template cannot be empty"});
   if(t.length>20000)return res.status(400).json({error:"The letter template is too long"});
   const unknown=[...new Set([...t.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m=>m[1]).filter(k=>!LETTER_PLACEHOLDERS.includes(k)))];
   if(unknown.length)return res.status(400).json({error:"Unknown placeholder(s): "+unknown.map(u=>`{{${u}}}`).join(", ")});
-  const def=offer?DEFAULT_OFFER_TEMPLATE:DEFAULT_LETTER_TEMPLATE;
-  await db.prepare(`UPDATE companies SET ${offer?"offer_template":"letter_template"}=? WHERE id=?`).run(t===def?null:t,req.user.company_id);
-  await audit(req,"UPDATE",offer?"OFFER_TEMPLATE":"LETTER_TEMPLATE","");res.json({ok:true});
+  if(DEFAULT_TEMPLATES[type]){
+    await db.prepare("INSERT INTO letter_templates(company_id,type,content) VALUES(?,?,?) ON CONFLICT(company_id,type) DO UPDATE SET content=excluded.content").run(req.user.company_id,type,t===DEFAULT_TEMPLATES[type]?"":t);
+  }else{
+    const offer=type==="Offer Letter",def=offer?DEFAULT_OFFER_TEMPLATE:DEFAULT_LETTER_TEMPLATE;
+    await db.prepare(`UPDATE companies SET ${offer?"offer_template":"letter_template"}=? WHERE id=?`).run(t===def?null:t,req.user.company_id);
+  }
+  await audit(req,"UPDATE","LETTER_TEMPLATE",type);res.json({ok:true});
 }));
-const LETTER_TYPES=["Offer Letter","Appointment Letter"];
-const refPrefix=t=>t==="Offer Letter"?"OFR":"APT";
+const LETTER_TYPES=["Offer Letter","Appointment Letter","Experience Certificate","Relieving Letter","NOC","Termination Letter"];
+const SIGN_TYPES=["Offer Letter","Appointment Letter"];
+const TYPE_KEY={offer:"Offer Letter",appointment:"Appointment Letter",experience:"Experience Certificate",relieving:"Relieving Letter",noc:"NOC",termination:"Termination Letter"};
+const REF_PREFIX={"Offer Letter":"OFR","Appointment Letter":"APT","Experience Certificate":"EXP","Relieving Letter":"REL","NOC":"NOC","Termination Letter":"TRM"};
+
 // Creates a login for the employee if there is none (username = employee code). Returns the temporary password only when one was created.
 async function ensureEmployeeLogin(companyId,emp){
   const ex=await db.prepare("SELECT username FROM users WHERE employee_id=? AND company_id=? ORDER BY id LIMIT 1").get(emp.id,companyId);
@@ -1206,7 +1305,7 @@ async function emailLetterEx(companyId,emp,letter,pdf,extraHtml,baseUrl){
   const intro=signed
     ?`<p>Dear ${esc2(emp.name)},</p><p>Thank you for signing your <b>${esc2(letter.letter_type)}</b> (Ref: ${esc2(letter.ref_no)}). A signed copy is attached for your records.</p>`
     :`<p>Dear ${esc2(emp.name)},</p><p>Please find attached your <b>${esc2(letter.letter_type)}</b> (Ref: ${esc2(letter.ref_no)}).</p>
-       <p>Please sign in to the HR portal${baseUrl?` (${esc2(baseUrl)})`:""}, open <b>Letters</b> and use <b>Review &amp; Sign</b> to accept it.</p>`;
+       ${SIGN_TYPES.includes(letter.letter_type)?`<p>Please sign in to the HR portal${baseUrl?` (${esc2(baseUrl)})`:""}, open <b>Letters</b> and use <b>Review &amp; Sign</b> to accept it.</p>`:""}`;
   const r=await sendMailEx(emp.email,`${letter.letter_type}${signed?" (signed)":""} — ${sender?.name||"Company"}`,layout(letter.letter_type,
     `${intro}${extraHtml||""}<p>Regards,<br>HR Team, ${esc2(sender?.name||"")}</p>`),
     sender,[{filename:`${String(letter.ref_no).replace(/\//g,"-")}.pdf`,content:pdf,contentType:"application/pdf"}]);
@@ -1216,11 +1315,11 @@ async function emailLetterEx(companyId,emp,letter,pdf,extraHtml,baseUrl){
 async function issueLetterFor(companyId,emp,type,issuedBy,opts={}){
   const co=await db.prepare("SELECT code FROM companies WHERE id=?").get(companyId);
   const ref=await nextRefNo(companyId,co?.code,type);
-  const {content,missing,company}=await buildLetter(companyId,emp,ref,type);
+  const {content,missing,company}=await buildLetter(companyId,emp,ref,type,opts.extra);
   if(missing.length)throw Object.assign(new Error("Please complete the employee's "+missing.join(", ")+" before issuing the letter."),{status:400});
   const r=await db.prepare("INSERT INTO letters(company_id,employee_id,letter_type,ref_no,content,issued_by,status) VALUES(?,?,?,?,?,?,?)").run(companyId,emp.id,type,ref,content,issuedBy,"Issued");
   const letter={id:r.lastInsertRowid,letter_type:type,ref_no:ref,status:"Issued"};
-  const login=await ensureEmployeeLogin(companyId,emp);
+  const login=type==="Offer Letter"?await ensureEmployeeLogin(companyId,emp):{created:false,username:null};
   let emailed=false;
   if(opts.sendEmail!==false){
     const extra=login.created?`<p><b>Your login</b><br>Username: ${esc2(login.username)}<br>Temporary password: ${esc2(login.tempPassword)}<br>Please change the password after signing in.</p>`:"";
@@ -1231,10 +1330,11 @@ async function issueLetterFor(companyId,emp,type,issuedBy,opts={}){
 }
 app.post("/api/employees/:id/letters/preview",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const type=LETTER_TYPES.includes(req.body?.type)?req.body.type:"Appointment Letter";
+  if(type==="Termination Letter")return res.status(400).json({error:"A termination letter is issued from Exit / Separation after the Director approves it"});
   const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found"});
   const co=await db.prepare("SELECT code FROM companies WHERE id=?").get(req.user.company_id);
-  const {content,missing}=await buildLetter(req.user.company_id,emp,await nextRefNo(req.user.company_id,co?.code,type),type);
+  const {content,missing}=await buildLetter(req.user.company_id,emp,await nextRefNo(req.user.company_id,co?.code,type),type,{purpose:req.body?.purpose});
   const notes=[];
   if(type==="Appointment Letter"&&!req.body?.skip_offer){
     const offer=await db.prepare("SELECT status FROM letters WHERE employee_id=? AND company_id=? AND letter_type='Offer Letter' ORDER BY id DESC LIMIT 1").get(emp.id,req.user.company_id);
@@ -1245,14 +1345,16 @@ app.post("/api/employees/:id/letters/preview",auth,requireCompany,roles("Super A
 }));
 app.post("/api/employees/:id/letters",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const type=LETTER_TYPES.includes(req.body?.type)?req.body.type:"Appointment Letter";
+  if(type==="Termination Letter")return res.status(400).json({error:"A termination letter is issued from Exit / Separation after the Director approves it"});
   const emp=await db.prepare("SELECT * FROM employees WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
   if(!emp)return res.status(404).json({error:"Employee not found"});
+  if(type==="NOC"&&!String(req.body?.purpose||"").trim())return res.status(400).json({error:"Write the purpose of the NOC"});
   if(type==="Appointment Letter"&&!req.body?.skip_offer){
     const offer=await db.prepare("SELECT status FROM letters WHERE employee_id=? AND company_id=? AND letter_type='Offer Letter' ORDER BY id DESC LIMIT 1").get(emp.id,req.user.company_id);
     if(!offer||offer.status!=="Signed")return res.status(400).json({error:"Issue the offer letter first and wait for the employee to sign it. The appointment letter is issued automatically after that."});
   }
   try{
-    const r=await issueLetterFor(req.user.company_id,emp,type,req.user.username,{sendEmail:req.body?.send_email!==false,baseUrl:`${req.protocol}://${req.get("host")}`});
+    const r=await issueLetterFor(req.user.company_id,emp,type,req.user.username,{sendEmail:req.body?.send_email!==false,baseUrl:`${req.protocol}://${req.get("host")}`,extra:{purpose:req.body?.purpose}});
     await audit(req,"ISSUE","LETTER",`${r.ref_no} → ${emp.employee_code}`);
     res.json({ok:true,...r});
   }catch(e){res.status(e.status||500).json({error:e.message})}
@@ -1968,18 +2070,6 @@ app.post("/api/tickets/:id/status",auth,requireCompany,roles("Super Admin","HR A
 }));
 
 /* ---------------- Resignation: only the employee submits it ---------------- */
-app.post("/api/exits",auth,requireCompany,wrap(async(req,res)=>{
-  if(req.user.role!=="Employee")return res.status(403).json({error:"Only the employee can submit a resignation."});
-  const emp=await db.prepare("SELECT id,name,employee_code FROM employees WHERE id=? AND company_id=?").get(req.user.employee_id,req.user.company_id);
-  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
-  const x=req.body;
-  if(!x.resignation_date||!x.last_working_date)return res.status(400).json({error:"Enter the resignation date and the last working date"});
-  if(await db.prepare("SELECT id FROM exit_requests WHERE employee_id=? AND status='Pending'").get(emp.id))return res.status(400).json({error:"You already have a resignation waiting for approval"});
-  const r=await db.prepare("INSERT INTO exit_requests(company_id,employee_id,resignation_date,last_working_date,reason) VALUES(?,?,?,?,?)").run(req.user.company_id,emp.id,x.resignation_date,x.last_working_date,x.reason||"");
-  res.json({id:r.lastInsertRowid});
-  roleEmails(req.user.company_id,["HR Admin","Director"]).then(to=>notifyMany(req.user.company_id,to,`Resignation submitted — ${emp.name}`,"Resignation submitted",
-    `<p><b>${esc2(emp.name)}</b> (${esc2(emp.employee_code)}) has submitted a resignation.</p>${rowsHtml([["Resignation date",x.resignation_date],["Last working date",x.last_working_date],["Reason",x.reason]])}`)).catch(e=>console.error("exit mail",e.message));
-}));
 
 
 /* ---------------- Payslip PDF, payslip email and salary payment (UTR) ---------------- */
@@ -2364,10 +2454,40 @@ app.get("/api/assets",auth,requireCompany,wrap(async(req,res)=>{
   if(req.user.role==="Employee"){q+=" AND a.employee_id=?";p.push(req.user.employee_id||0)}
   res.json(await db.prepare(q+" ORDER BY a.id DESC").all(...p));
 }));
+async function assetEvent(companyId,assetId,empId,action,date,condition,note,by){
+  await db.prepare("INSERT INTO asset_history(company_id,asset_id,employee_id,action,on_date,condition,note,by_user) VALUES(?,?,?,?,?,?,?,?)").run(companyId,assetId,empId||null,action,date,condition||null,note||null,by);
+}
+app.post("/api/assets/:id/allot",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const a=await db.prepare("SELECT * FROM assets WHERE id=? AND company_id=?").get(req.params.id,req.user.company_id);
+  if(!a)return res.status(404).json({error:"Asset not found"});
+  if(a.employee_id)return res.status(400).json({error:"This asset is already allotted. Take it back first."});
+  const emp=await db.prepare("SELECT id,name,email,status FROM employees WHERE id=? AND company_id=?").get(Number(req.body?.employee_id),req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found"});
+  const date=/^\d{4}-\d{2}-\d{2}$/.test(req.body?.date||"")?req.body.date:istNow().date,by=req.user.full_name||req.user.username;
+  await db.prepare("UPDATE assets SET employee_id=?,status='Assigned',issued_date=?,return_date=NULL WHERE id=?").run(emp.id,date,a.id);
+  await assetEvent(req.user.company_id,a.id,emp.id,"Allotted",date,req.body?.condition,req.body?.note,by);
+  await audit(req,"ALLOT","ASSET",a.asset_code);res.json({ok:true});
+  if(emp.email)notifyMany(req.user.company_id,[emp.email],`Asset allotted: ${a.name}`,"Company asset allotted",`<p>Hi ${esc2(emp.name)},</p><p>The following asset has been allotted to you. Please take care of it and return it when asked or when you leave.</p>${rowsHtml([["Asset",a.name],["Asset code",a.asset_code],["Serial number",a.serial_no],["Allotted on",date],["Condition",req.body?.condition],["Note",req.body?.note]])}`).catch(()=>{});
+}));
+app.post("/api/assets/:id/return",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const a=await db.prepare("SELECT a.*,e.name emp_name,e.email emp_email FROM assets a LEFT JOIN employees e ON e.id=a.employee_id WHERE a.id=? AND a.company_id=?").get(req.params.id,req.user.company_id);
+  if(!a)return res.status(404).json({error:"Asset not found"});
+  if(!a.employee_id)return res.status(400).json({error:"This asset is not allotted to anyone"});
+  const cond=["Good","Damaged","Lost"].includes(req.body?.condition)?req.body.condition:"Good";
+  const date=/^\d{4}-\d{2}-\d{2}$/.test(req.body?.date||"")?req.body.date:istNow().date,by=req.user.full_name||req.user.username;
+  await db.prepare("UPDATE assets SET employee_id=NULL,status=?,return_date=? WHERE id=?").run(cond==="Good"?"Available":cond,date,a.id);
+  await assetEvent(req.user.company_id,a.id,a.employee_id,"Returned",date,cond,req.body?.note,by);
+  await audit(req,"RETURN","ASSET",a.asset_code);res.json({ok:true});
+  if(a.emp_email)notifyMany(req.user.company_id,[a.emp_email],`Asset returned: ${a.name}`,"Company asset returned",`<p>Hi ${esc2(a.emp_name)},</p><p>We have received the asset back. Thank you.</p>${rowsHtml([["Asset",a.name],["Asset code",a.asset_code],["Returned on",date],["Condition",cond],["Note",req.body?.note]])}`).catch(()=>{});
+}));
+app.get("/api/assets/:id/history",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  res.json(await db.prepare("SELECT h.*,e.name employee_name,e.employee_code FROM asset_history h LEFT JOIN employees e ON e.id=h.employee_id WHERE h.asset_id=? AND h.company_id=? ORDER BY h.id DESC").all(req.params.id,req.user.company_id));
+}));
 app.post("/api/assets",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
   const x=req.body;
   try{
-    const r=await db.prepare("INSERT INTO assets(company_id,asset_code,name,category,serial_no,status,employee_id,issued_date) VALUES(?,?,?,?,?,?,?,?)").run(req.user.company_id,x.asset_code,x.name,x.category,x.serial_no,x.status||"Available",x.employee_id||null,x.issued_date||null);
+    const r=await db.prepare("INSERT INTO assets(company_id,asset_code,name,category,serial_no,status,employee_id,issued_date) VALUES(?,?,?,?,?,?,?,?)").run(req.user.company_id,x.asset_code,x.name,x.category,x.serial_no,x.employee_id?"Assigned":"Available",x.employee_id||null,x.employee_id?(x.issued_date||istNow().date):null);
+    if(x.employee_id)await assetEvent(req.user.company_id,r.lastInsertRowid,x.employee_id,"Allotted",x.issued_date||istNow().date,null,"Allotted when added",req.user.full_name||req.user.username);
     res.json({id:r.lastInsertRowid});
   }catch(e){res.status(400).json({error:/duplicate key|unique/i.test(e.message)?"Asset code already exists":e.message})}
 }));
@@ -2564,24 +2684,184 @@ app.get("/api/awards",auth,requireCompany,wrap(async(req,res)=>{
   res.json(await db.prepare("SELECT a.*,e.name,e.employee_code,e.department FROM awards a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY a.period DESC LIMIT 24").all(req.user.company_id));
 }));
 
+/* ---------------- Exit / separation: resignation and termination with Director approval, clearance, F&F and certificates ---------------- */
+const managerEmailsOf=async empId=>(await db.prepare("SELECT e.email FROM employee_managers em JOIN employees e ON e.id=em.manager_id WHERE em.employee_id=? AND e.email IS NOT NULL AND e.email<>''").all(empId)).map(r=>r.email);
+async function notifyExit(companyId,ex,subject,title,html,to={}){
+  const emp=await db.prepare("SELECT email FROM employees WHERE id=?").get(ex.employee_id);
+  const list=[];
+  if(to.employee!==false&&emp?.email)list.push(emp.email);
+  if(to.hr!==false)list.push(...await roleEmails(companyId,["HR Admin"]));
+  if(to.director!==false)list.push(...await roleEmails(companyId,["Director"]));
+  if(to.managers!==false)list.push(...await managerEmailsOf(ex.employee_id));
+  if(to.finance)list.push(...await roleEmails(companyId,["Finance"]));
+  await notifyMany(companyId,list,subject,title,html);
+}
+const exitLine=(ex,emp)=>rowsHtml([["Employee",`${emp.name} (${emp.employee_code})`],["Type",ex.kind||"Resignation"],["Resignation / notice date",ex.resignation_date],["Last working date",ex.approved_lwd||ex.last_working_date],["Reason",ex.reason]]);
+function tenureText(from,to){
+  const a=new Date(String(from).slice(0,10)+"T00:00:00Z"),b=new Date(String(to).slice(0,10)+"T00:00:00Z");
+  if(isNaN(a)||isNaN(b)||b<a)return "-";
+  let m=(b.getUTCFullYear()-a.getUTCFullYear())*12+b.getUTCMonth()-a.getUTCMonth();if(b.getUTCDate()<a.getUTCDate())m--;
+  const y=Math.floor(m/12),mm=m%12;
+  return [y?`${y} year${y>1?"s":""}`:"",mm?`${mm} month${mm>1?"s":""}`:""].filter(Boolean).join(" ")||"less than a month";
+}
+const exitStatusOf=ex=>ex.stage;
+async function loadExit(req,id){
+  const ex=await db.prepare("SELECT x.*,e.name employee_name,e.employee_code,e.designation,e.department,e.joining_date,e.email employee_email,e.status employee_status FROM exit_requests x JOIN employees e ON e.id=x.employee_id WHERE x.id=? AND x.company_id=?").get(id,req.user.company_id);
+  return ex;
+}
+async function canSeeExit(req,ex){
+  if(["Super Admin","HR Admin","Director","Finance"].includes(req.user.role))return true;
+  if(req.user.role==="Employee")return ex.employee_id===req.user.employee_id;
+  if(req.user.role==="Manager")return ex.employee_id===req.user.employee_id||!!await db.prepare("SELECT 1 x FROM employee_managers WHERE employee_id=? AND manager_id=?").get(ex.employee_id,req.user.employee_id||0);
+  return false;
+}
 app.get("/api/exits",auth,requireCompany,wrap(async(req,res)=>{
-  let q=`SELECT x.*,e.name employee_name,e.employee_code FROM exit_requests x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?`;let p=[req.user.company_id];
-  if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id)}q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
+  let q=`SELECT x.*,e.name employee_name,e.employee_code,e.designation,e.department FROM exit_requests x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=?`;let p=[req.user.company_id];
+  if(req.user.role==="Employee"){q+=" AND x.employee_id=?";p.push(req.user.employee_id||0)}
+  else if(req.user.role==="Manager"){q+=" AND (x.employee_id=? OR EXISTS(SELECT 1 FROM employee_managers em WHERE em.employee_id=x.employee_id AND em.manager_id=?))";p.push(req.user.employee_id||0,req.user.employee_id||0)}
+  q+=" ORDER BY x.id DESC";res.json(await db.prepare(q).all(...p));
 }));
-app.post("/api/exits/:id/status",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
-  const x=req.body;
-  const r=await db.prepare("UPDATE exit_requests SET status=COALESCE(?,status),clearance=COALESCE(?,clearance),fnf_status=COALESCE(?,fnf_status) WHERE id=? AND company_id=?")
-    .run(x.status||null,x.clearance||null,x.fnf_status||null,req.params.id,req.user.company_id);
-  if(r.changes===0)return res.status(404).json({error:"Exit request not found"});
-  if(x.status==="Approved"){
-    const ex=await db.prepare("SELECT employee_id FROM exit_requests WHERE id=?").get(req.params.id);
-    if(ex)await db.prepare("UPDATE employees SET status='Inactive' WHERE id=? AND company_id=?").run(ex.employee_id,req.user.company_id);
+app.post("/api/exits",auth,requireCompany,wrap(async(req,res)=>{
+  if(req.user.role!=="Employee")return res.status(403).json({error:"Only the employee can submit a resignation."});
+  const emp=await db.prepare("SELECT id,name,employee_code FROM employees WHERE id=? AND company_id=?").get(req.user.employee_id,req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found in this company"});
+  const x=req.body||{};
+  if(!x.resignation_date||!x.last_working_date)return res.status(400).json({error:"Enter the resignation date and the last working date you are proposing"});
+  if(x.last_working_date<x.resignation_date)return res.status(400).json({error:"The last working date cannot be before the resignation date"});
+  if(await db.prepare("SELECT id FROM exit_requests WHERE employee_id=? AND stage NOT IN ('Completed','Rejected','Withdrawn')").get(emp.id))return res.status(400).json({error:"You already have a resignation in progress"});
+  const r=await db.prepare("INSERT INTO exit_requests(company_id,employee_id,resignation_date,last_working_date,reason,kind,stage) VALUES(?,?,?,?,?,'Resignation','HR Review')").run(req.user.company_id,emp.id,x.resignation_date,x.last_working_date,x.reason||"");
+  await audit(req,"CREATE","EXIT",String(r.lastInsertRowid));res.json({id:r.lastInsertRowid});
+  const ex={id:r.lastInsertRowid,employee_id:emp.id,kind:"Resignation",resignation_date:x.resignation_date,last_working_date:x.last_working_date,reason:x.reason};
+  notifyExit(req.user.company_id,ex,`Resignation submitted — ${emp.name}`,"Resignation submitted",`<p><b>${esc2(emp.name)}</b> has submitted a resignation. HR will review it and the Director will approve it.</p>${exitLine(ex,emp)}`).catch(e=>console.error("exit mail",e.message));
+}));
+app.post("/api/exits/terminate",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const x=req.body||{};
+  const emp=await db.prepare("SELECT id,name,employee_code,status FROM employees WHERE id=? AND company_id=?").get(Number(x.employee_id),req.user.company_id);
+  if(!emp)return res.status(404).json({error:"Employee not found"});
+  if(!x.effective_date)return res.status(400).json({error:"Choose the effective date of the termination"});
+  if(!String(x.reason||"").trim())return res.status(400).json({error:"Write the reason for the termination"});
+  if(await db.prepare("SELECT id FROM exit_requests WHERE employee_id=? AND stage NOT IN ('Completed','Rejected','Withdrawn')").get(emp.id))return res.status(400).json({error:"This employee already has an exit in progress"});
+  const by=req.user.full_name||req.user.username;
+  const r=await db.prepare("INSERT INTO exit_requests(company_id,employee_id,resignation_date,last_working_date,reason,kind,stage,hr_note,hr_by,hr_at,approved_lwd) VALUES(?,?,?,?,?,'Termination','Director Approval',?,?,?,?)")
+    .run(req.user.company_id,emp.id,istNow().date,x.effective_date,String(x.reason).trim(),"Termination initiated by HR",by,new Date().toISOString(),x.effective_date);
+  await audit(req,"TERMINATE","EXIT",String(r.lastInsertRowid));res.json({id:r.lastInsertRowid});
+  const ex={id:r.lastInsertRowid,employee_id:emp.id,kind:"Termination",resignation_date:istNow().date,last_working_date:x.effective_date,reason:x.reason};
+  notifyExit(req.user.company_id,ex,`Termination for approval — ${emp.name}`,"Termination needs Director approval",`<p>HR has proposed the termination of <b>${esc2(emp.name)}</b>. It takes effect only after the Director approves it.</p>${exitLine(ex,emp)}`,{employee:false,managers:false}).catch(e=>console.error("exit mail",e.message));
+}));
+app.post("/api/exits/:id/hr",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const ex=await loadExit(req,req.params.id);if(!ex)return res.status(404).json({error:"Exit request not found"});
+  if(ex.stage!=="HR Review")return res.status(400).json({error:"This request is not waiting for HR review"});
+  const x=req.body||{},note=String(x.note||"").trim(),by=req.user.full_name||req.user.username;
+  if(x.action==="reject"){
+    if(!note)return res.status(400).json({error:"Please give a reason"});
+    await db.prepare("UPDATE exit_requests SET status='Rejected',stage='Rejected',hr_note=?,hr_by=?,hr_at=? WHERE id=?").run(note,by,new Date().toISOString(),ex.id);
+    res.json({ok:true});
+    notifyExit(req.user.company_id,ex,`Your resignation was not accepted`,"Resignation not accepted",`<p>Hi ${esc2(ex.employee_name)}, HR could not accept your resignation.</p><p><b>Reason:</b> ${esc2(note)}</p>`,{director:false,managers:false,hr:false}).catch(()=>{});
+    return;
   }
-  await audit(req,"STATUS","EXIT",req.params.id);res.json({ok:true});
-  if(x.status){
-    const ex=await db.prepare("SELECT x.last_working_date,e.email,e.name FROM exit_requests x JOIN employees e ON e.id=x.employee_id WHERE x.id=?").get(req.params.id);
-    if(ex?.email)notifyMany(req.user.company_id,[ex.email],`Your resignation was ${String(x.status).toLowerCase()}`,`Resignation ${x.status}`,`<p>Hi ${esc2(ex.name)},</p><p>Your resignation has been <b>${esc2(x.status)}</b>. Your last working date is ${esc2(ex.last_working_date)}.</p>`).catch(()=>{});
+  if(x.action!=="recommend")return res.status(400).json({error:"Choose recommend or reject"});
+  const lwd=/^\d{4}-\d{2}-\d{2}$/.test(x.approved_lwd||"")?x.approved_lwd:ex.last_working_date;
+  await db.prepare("UPDATE exit_requests SET stage='Director Approval',hr_note=?,hr_by=?,hr_at=?,approved_lwd=? WHERE id=?").run(note||"Recommended",by,new Date().toISOString(),lwd,ex.id);
+  await audit(req,"RECOMMEND","EXIT",String(ex.id));res.json({ok:true});
+  notifyExit(req.user.company_id,ex,`Resignation for Director approval — ${ex.employee_name}`,"Resignation needs your approval",`<p>HR has recommended the resignation of <b>${esc2(ex.employee_name)}</b> with last working date <b>${esc2(lwd)}</b>.</p>${note?`<p><b>HR note:</b> ${esc2(note)}</p>`:""}<p>Please open Exit / Separation in the HR portal to approve or reject it.</p>`,{employee:false,managers:false}).catch(()=>{});
+}));
+app.post("/api/exits/:id/director",auth,requireCompany,roles("Director"),wrap(async(req,res)=>{
+  const ex=await loadExit(req,req.params.id);if(!ex)return res.status(404).json({error:"Exit request not found"});
+  if(ex.stage!=="Director Approval")return res.status(400).json({error:"This request is not waiting for Director approval"});
+  const x=req.body||{},note=String(x.note||"").trim(),by=req.user.full_name||req.user.username;
+  if(x.action==="reject"){
+    if(!note)return res.status(400).json({error:"Please give a reason"});
+    await db.prepare("UPDATE exit_requests SET status='Rejected',stage='Rejected',director_status='Rejected',director_note=?,director_by=?,director_at=? WHERE id=?").run(note,by,new Date().toISOString(),ex.id);
+    res.json({ok:true});
+    notifyExit(req.user.company_id,ex,`${ex.kind} was not approved — ${ex.employee_name}`,`${ex.kind} not approved`,`<p>The Director did not approve the ${esc2(ex.kind.toLowerCase())} of <b>${esc2(ex.employee_name)}</b>.</p><p><b>Reason:</b> ${esc2(note)}</p>`).catch(()=>{});
+    return;
   }
+  if(x.action!=="approve")return res.status(400).json({error:"Choose approve or reject"});
+  const lwd=ex.approved_lwd||ex.last_working_date;
+  const stage=ex.kind==="Termination"||lwd<=istNow().date?"Clearance":"Notice Period";
+  await db.prepare("UPDATE exit_requests SET status='Approved',stage=?,director_status='Approved',director_note=?,director_by=?,director_at=?,approved_lwd=? WHERE id=?").run(stage,note||null,by,new Date().toISOString(),lwd,ex.id);
+  await audit(req,"APPROVE","EXIT",String(ex.id));res.json({ok:true,stage});
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=?").get(ex.employee_id);
+  const fresh={...ex,approved_lwd:lwd};
+  if(ex.kind==="Termination"){
+    try{await issueLetterFor(req.user.company_id,emp,"Termination Letter",by,{extra:{effective_date:fmtDate(lwd),reason:ex.reason,last_working_date:fmtDate(lwd)},baseUrl:""})}catch(e){console.error("termination letter",e.message)}
+  }
+  notifyExit(req.user.company_id,fresh,`${ex.kind} approved — ${ex.employee_name}`,`${ex.kind} approved`,`<p>The Director has approved the ${esc2(ex.kind.toLowerCase())} of <b>${esc2(ex.employee_name)}</b>. Last working date: <b>${esc2(lwd)}</b>.</p>${note?`<p><b>Note:</b> ${esc2(note)}</p>`:""}<p>Next steps: return of company assets and clearance, then the full and final settlement, and finally the experience and relieving certificates.</p>`).catch(()=>{});
+}));
+app.post("/api/exits/:id/withdraw",auth,requireCompany,wrap(async(req,res)=>{
+  const ex=await loadExit(req,req.params.id);if(!ex)return res.status(404).json({error:"Exit request not found"});
+  if(req.user.role!=="Employee"||ex.employee_id!==req.user.employee_id)return res.status(403).json({error:"Only the employee can withdraw a resignation"});
+  if(!["HR Review","Director Approval"].includes(ex.stage))return res.status(400).json({error:"A resignation can only be withdrawn before it is approved"});
+  await db.prepare("UPDATE exit_requests SET status='Rejected',stage='Withdrawn' WHERE id=?").run(ex.id);
+  res.json({ok:true});
+  notifyExit(req.user.company_id,ex,`Resignation withdrawn — ${ex.employee_name}`,"Resignation withdrawn",`<p><b>${esc2(ex.employee_name)}</b> has withdrawn the resignation.</p>`).catch(()=>{});
+}));
+app.post("/api/exits/:id/clearance",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const ex=await loadExit(req,req.params.id);if(!ex)return res.status(404).json({error:"Exit request not found"});
+  if(!["Notice Period","Clearance"].includes(ex.stage))return res.status(400).json({error:"Clearance can only be completed after the Director's approval"});
+  const held=await db.prepare("SELECT asset_code,name FROM assets WHERE company_id=? AND employee_id=?").all(req.user.company_id,ex.employee_id);
+  if(held.length&&!req.body?.force)return res.status(400).json({error:"These assets are still with the employee: "+held.map(a=>`${a.asset_code} (${a.name})`).join(", ")+". Mark them as returned first.",assets:held});
+  await db.prepare("UPDATE exit_requests SET clearance='Completed',clearance_note=?,clearance_at=?,stage='F&F' WHERE id=?").run(String(req.body?.note||"").trim()||null,new Date().toISOString(),ex.id);
+  await audit(req,"CLEARANCE","EXIT",String(ex.id));res.json({ok:true});
+  notifyExit(req.user.company_id,ex,`Clearance completed — ${ex.employee_name}`,"Clearance completed",`<p>The clearance of <b>${esc2(ex.employee_name)}</b> is complete. The full and final settlement is next.</p>`,{director:false,managers:false,finance:true}).catch(()=>{});
+}));
+app.get("/api/exits/:id/detail",auth,requireCompany,wrap(async(req,res)=>{
+  const ex=await loadExit(req,req.params.id);if(!ex)return res.status(404).json({error:"Exit request not found"});
+  if(!await canSeeExit(req,ex))return res.status(403).json({error:"Permission denied"});
+  const emp=await db.prepare("SELECT basic_salary,hra,other_allowances FROM employees WHERE id=?").get(ex.employee_id);
+  const assets=await db.prepare("SELECT id,asset_code,name,category,serial_no,issued_date FROM assets WHERE company_id=? AND employee_id=?").all(req.user.company_id,ex.employee_id);
+  const loans=await db.prepare("SELECT id,kind,balance FROM loans WHERE employee_id=? AND status='Approved' AND balance>0").all(ex.employee_id);
+  const gross=(Number(emp?.basic_salary)||0)+(Number(emp?.hra)||0)+(Number(emp?.other_allowances)||0);
+  const lwd=ex.approved_lwd||ex.last_working_date||istNow().date;
+  const dim=new Date(Number(lwd.slice(0,4)),Number(lwd.slice(5,7)),0).getDate(),day=Number(lwd.slice(8,10));
+  const paid=await db.prepare("SELECT 1 x FROM payroll WHERE employee_id=? AND month=?").get(ex.employee_id,lwd.slice(0,7));
+  const balances=await leaveBalanceFor(req.user.company_id,ex.employee_id);
+  const suggest={pending_salary:paid?0:Math.round(gross/dim*day),leave_encashment:0,bonus:0,other_earnings:0,loan_recovery:loans.reduce((a,l)=>a+Number(l.balance),0),notice_recovery:0,asset_recovery:0,other_deductions:0};
+  const letters=await db.prepare("SELECT id,letter_type,ref_no,issued_at FROM letters WHERE employee_id=? AND letter_type IN ('Experience Certificate','Relieving Letter','Termination Letter') ORDER BY id").all(ex.employee_id);
+  const {employee_email,...safe}=ex;
+  let fnf=null;try{fnf=JSON.parse(ex.fnf_breakdown||"")}catch{}
+  res.json({exit:safe,assets,loans,suggest,perDay:gross?Math.round(gross/dim):0,leave:balances.filter(b=>b.remaining>0&&b.annual_balance>0).map(b=>({type:b.leave_type,remaining:b.remaining})),letters,fnf,tenure:tenureText(ex.joining_date,lwd),paidThisMonth:!!paid,role:req.user.role});
+}));
+const FNF_ITEMS=[["pending_salary","Salary for the last month",1],["leave_encashment","Leave encashment",1],["bonus","Bonus / incentive",1],["other_earnings","Other payments",1],["loan_recovery","Loan / advance recovery",-1],["notice_recovery","Notice period recovery",-1],["asset_recovery","Asset damage / loss recovery",-1],["other_deductions","Other deductions",-1]];
+app.post("/api/exits/:id/fnf",auth,requireCompany,roles("Super Admin","HR Admin","Finance"),wrap(async(req,res)=>{
+  const ex=await loadExit(req,req.params.id);if(!ex)return res.status(404).json({error:"Exit request not found"});
+  if(ex.stage!=="F&F")return res.status(400).json({error:"The settlement can be made only after the clearance is complete"});
+  const x=req.body||{};let net=0;const lines=[];
+  for(const [k,label,sign] of FNF_ITEMS){
+    const v=Number(x.items?.[k]||0);if(!(v>=0))return res.status(400).json({error:`${label} must be a positive number`});
+    if(v>0)lines.push({key:k,label,amount:v,sign});net+=sign*v;
+  }
+  net=Math.round(net*100)/100;
+  const utr=String(x.utr||"").trim(),date=/^\d{4}-\d{2}-\d{2}$/.test(x.paid_date||"")?x.paid_date:null;
+  await db.prepare("UPDATE exit_requests SET fnf_status='Processed',fnf_amount=?,fnf_breakdown=?,fnf_utr=?,fnf_paid_on=?,stage='Certificates' WHERE id=?").run(net,JSON.stringify({lines,net}),utr||null,date,ex.id);
+  // recovered loans are closed
+  const loans=await db.prepare("SELECT id,balance FROM loans WHERE employee_id=? AND status='Approved' AND balance>0").all(ex.employee_id);
+  if(Number(x.items?.loan_recovery||0)>0)for(const l of loans){await db.prepare("INSERT INTO loan_recoveries(loan_id,month,amount) VALUES(?,?,?) ON CONFLICT(loan_id,month) DO UPDATE SET amount=excluded.amount").run(l.id,"F&F",l.balance);await db.prepare("UPDATE loans SET balance=0,status='Closed' WHERE id=?").run(l.id)}
+  await audit(req,"FNF","EXIT",String(ex.id));res.json({ok:true,net});
+  notifyExit(req.user.company_id,ex,`Full and final settlement — ${ex.employee_name}`,"Full and final settlement",`<p>Hi ${esc2(ex.employee_name)}, your full and final settlement has been processed.</p><table style="border-collapse:collapse;font-size:14px">${lines.map(l=>`<tr><td style="padding:4px 14px 4px 0;color:#64748b">${l.sign>0?"":"Less: "}${esc2(l.label)}</td><td style="text-align:right">${inrEm(l.amount)}</td></tr>`).join("")}<tr><td style="padding:8px 14px 4px 0"><b>Net payable</b></td><td style="text-align:right"><b>${inrEm(net)}</b></td></tr></table>${utr?`<p style="margin-top:10px">Bank reference: <b>${esc2(utr)}</b>${date?" on "+esc2(date):""}.</p>`:""}<p>Your experience and relieving letters will follow.</p>`,{director:false,managers:false}).catch(()=>{});
+}));
+app.post("/api/exits/:id/certificates",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>{
+  const ex=await loadExit(req,req.params.id);if(!ex)return res.status(404).json({error:"Exit request not found"});
+  if(ex.stage!=="Certificates")return res.status(400).json({error:"Certificates can be issued only after the full and final settlement"});
+  const emp=await db.prepare("SELECT * FROM employees WHERE id=?").get(ex.employee_id);
+  const lwd=ex.approved_lwd||ex.last_working_date,by=req.user.full_name||req.user.username;
+  const extra={last_working_date:fmtDate(lwd),resignation_date:fmtDate(ex.resignation_date),tenure:tenureText(emp.joining_date,lwd),effective_date:fmtDate(lwd),reason:ex.reason};
+  const issued=[];
+  try{
+    issued.push((await issueLetterFor(req.user.company_id,emp,"Experience Certificate",by,{extra,baseUrl:""})).ref_no);
+    if(ex.kind==="Resignation")issued.push((await issueLetterFor(req.user.company_id,emp,"Relieving Letter",by,{extra,baseUrl:""})).ref_no);
+  }catch(e){return res.status(e.status||500).json({error:e.message})}
+  await db.prepare("UPDATE exit_requests SET stage='Completed',certs_at=? WHERE id=?").run(new Date().toISOString(),ex.id);
+  await db.prepare("UPDATE employees SET status='Inactive' WHERE id=?").run(ex.employee_id);
+  await db.prepare("UPDATE users SET active=0 WHERE employee_id=?").run(ex.employee_id);
+  await db.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE employee_id=?)").run(ex.employee_id);
+  await audit(req,"CERTIFICATES","EXIT",String(ex.id));res.json({ok:true,issued});
+  notifyExit(req.user.company_id,ex,`Exit completed — ${ex.employee_name}`,"Exit completed",`<p>The exit process of <b>${esc2(ex.employee_name)}</b> is complete. The experience certificate${ex.kind==="Resignation"?" and relieving letter have":" has"} been emailed. The employee's login is now disabled.</p>`,{employee:false}).catch(()=>{});
+}));
+app.get("/api/exits/report",auth,requireCompany,roles("Super Admin","HR Admin","Director","Finance"),wrap(async(req,res)=>{
+  const rows=await db.prepare("SELECT x.id,x.kind,x.stage,x.status,x.resignation_date,x.last_working_date,x.approved_lwd,x.reason,x.fnf_amount,x.director_status,x.director_by,e.employee_code,e.name employee_name,e.department,e.designation,e.joining_date FROM exit_requests x JOIN employees e ON e.id=x.employee_id WHERE x.company_id=? ORDER BY x.id DESC").all(req.user.company_id);
+  const by=k=>Object.entries(rows.reduce((m,r)=>{m[r[k]||"-"]=(m[r[k]||"-"]||0)+1;return m},{})).map(([name,count])=>({name,count}));
+  res.json({total:rows.length,byStage:by("stage"),byKind:by("kind"),byDepartment:by("department"),pendingDirector:rows.filter(r=>r.stage==="Director Approval"),rows:rows.map(r=>({...r,tenure:tenureText(r.joining_date,r.approved_lwd||r.last_working_date||istNow().date)}))});
 }));
 
 app.get("/api/biometric/devices",auth,requireCompany,roles("Super Admin","HR Admin"),wrap(async(req,res)=>res.json(await db.prepare("SELECT * FROM biometric_devices WHERE company_id=? ORDER BY id DESC").all(req.user.company_id))));
