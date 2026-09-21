@@ -6,3 +6,6 @@ bms_hrms.db
 sync-agent.config.json
 .claude/
 sync-agent.state.json
+
+# terminal logs pasted from the server (contain secrets)
+cmd output*.txt
