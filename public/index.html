@@ -364,6 +364,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <section id="audit" class="page"><div class="pagehead"><h2>Audit Log</h2></div><div class="searchbar"><input id="auditSearch" placeholder="Search user / action / module..." oninput="renderAudit()"></div><div id="auditTable" class="tblwrap"></div></section>
 <section id="settings" class="page"><div class="pagehead"><h2>HR Policy Settings</h2></div><div class="panel"><div class="grid"><div><label>Office Start</label><input value="09:30"></div><div><label>Grace Minutes</label><input value="15"></div><div><label>Weekly Off</label><input value="Sunday"></div><div><label>Half Day</label><input value="13:30"></div><div><label>Payroll Cutoff</label><input value="25"></div><div><label>Leave Approval</label><input value="Manager → HR"></div></div><p class="small">Policy engine is structured so company rules can be made configurable in later production hardening.</p></div>
 <div class="panel"><h3>Company profile</h3><p class="small" style="margin-bottom:10px">These details appear on letters and emails. The company name and web address are managed by the platform administrator.</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Industry</label><input id="cpIndustry"></div><div class="field"><label>Contact phone</label><input id="cpPhone"></div></div><div class="field"><label>Address</label><input id="cpAddress"></div><div class="field"><label>Contact email</label><input id="cpEmail" placeholder="hr@company.com"></div><button onclick="saveCompanyProfile()">Save profile</button></div>
+<div class="panel"><h3>Training manual</h3><p class="small" style="margin-bottom:10px">A step-by-step guide for every role, with this portal address filled in.</p><a class="sm outline" style="padding:6px 12px;border-radius:6px;text-decoration:none;font-size:13px;display:inline-block" href="/api/training-manual">Download training manual (PDF)</a></div>
 <div class="panel" id="lhPanel"><h3>Letterhead</h3><p class="small" style="margin-bottom:10px">Upload your company letterhead as a full A4 page image (PNG or JPG). Appointment letters and agreements are then printed on it. Set the top and bottom margins so the text stays clear of the header and footer.</p>
 <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap"><div id="lhPrevBox" style="width:120px;height:170px;border:1px solid #e5e7eb;border-radius:6px;background:#f8fafc;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:12px;color:#94a3b8"><img id="lhPrev" style="display:none;width:100%;height:100%;object-fit:contain"><span id="lhNone">No letterhead</span></div>
 <div><div class="grid" style="grid-template-columns:1fr 1fr"><div class="field"><label>Top margin (points)</label><input id="lhTop" type="number" min="20" max="400"></div><div class="field"><label>Bottom margin (points)</label><input id="lhBottom" type="number" min="20" max="400"></div></div>
@@ -411,6 +412,7 @@ body.printing #payslipPrint td,body.printing #payslipPrint th{border:1px solid #
 <div class="field"><label>Address</label><input id="cmAddress" placeholder="Registered office address"></div>
 <div class="grid" style="grid-template-columns:1fr 1fr">
 <div class="field"><label>Contact Email</label><input id="cmEmail" placeholder="hr@company.com"></div>
+<div class="field"><label>Company web address (optional)</label><input id="cmDomain" placeholder="hr.company.com"></div>
 <div class="field"><label>Contact Phone</label><input id="cmPhone" placeholder="98xxxxxxxx"></div>
 </div>
 <div class="small" style="margin:14px 0 8px;font-weight:700;color:#334155">First HR Admin login for this company</div>
@@ -815,9 +817,9 @@ function applyPlatformBrand(){
 }
 let CM_LOGO=null;
 function chooseNewLogo(){pickImage(320,d=>{CM_LOGO=d;$("cmLogoPrev").src=d;$("cmLogoPrev").style.display="block"})}
-function openCompanyModal(){CM_LOGO=null;$("cmLogoPrev").style.display="none";["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
+function openCompanyModal(){CM_LOGO=null;$("cmLogoPrev").style.display="none";["cmName","cmCode","cmIndustry","cmAddress","cmEmail","cmPhone","cmDomain","cmAdminUser","cmAdminPass","cmSmtpUser","cmSmtpPass"].forEach(id=>$(id).value="");$("compErr").textContent="";$("compModal").classList.add("show")}
 async function submitCompany(){
-  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,logo:CM_LOGO,send_password:$("cmSendPw").checked,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
+  const body={name:$("cmName").value,code:$("cmCode").value,industry:$("cmIndustry").value,address:$("cmAddress").value,contact_email:$("cmEmail").value,contact_phone:$("cmPhone").value,logo:CM_LOGO,send_password:$("cmSendPw").checked,domain:$("cmDomain").value,admin_username:$("cmAdminUser").value,admin_password:$("cmAdminPass").value,smtp_user:$("cmSmtpUser").value,smtp_pass:$("cmSmtpPass").value};
   try{await api("/api/companies",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});$("compModal").classList.remove("show");alert("Company onboarded successfully. Share the HR Admin credentials with the company so they can sign in and get started.");loadPage("companies");loadCompaniesCache();}
   catch(e){$("compErr").textContent=e.message}
 }
@@ -825,7 +827,7 @@ async function companyStatus(id,status){try{await api(`/api/companies/${id}/stat
 function renderCompanies(){
   const rows=PAGEDATA.companies||[];
   table("compTable",["Company","Code","Domain","Industry","Employees","Status","Onboarded","Action"],rows.map(c=>[esc(c.name),`<span class="chip">${esc(c.code)}</span>`,c.custom_domain?esc(c.custom_domain):`<span class="small">Not set</span>`,esc(c.industry||"-"),c.employee_count,statusBadge(c.status),c.created_at,
-    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">View</button><button class="sm gray" onclick="openEditCompany(${c.id})">Edit</button><button class="sm gray" onclick="openUsers(${c.id})">Logins</button><button class="sm red" onclick="openDeleteCompany(${c.id})">Delete</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
+    `<div class="actions"><button class="sm outline" onclick="switchCompany(${c.id})">View</button><button class="sm gray" onclick="openEditCompany(${c.id})">Edit</button><button class="sm gray" onclick="openUsers(${c.id})">Logins</button><button class="sm red" onclick="openDeleteCompany(${c.id})">Delete</button><button class="sm gray" onclick="openDomain(${c.id})">Domain</button><a class="sm gray" style="padding:5px 10px;border-radius:6px;text-decoration:none;font-size:12px" href="/api/companies/${c.id}/training-manual">Manual</a><button class="sm ${c.status==='Active'?'red':'green'}" onclick="companyStatus(${c.id},'${c.status==='Active'?'Inactive':'Active'}')">${c.status==='Active'?'Deactivate':'Activate'}</button></div>`]));
 }
 async function openUsers(id){
   const c=(PAGEDATA.companies||[]).find(x=>x.id===id);
@@ -885,8 +887,8 @@ function openDomain(id){
   $("domainModal").classList.add("show");
 }
 function domainHelp(d){
-  const host=d.split(".")[0],p=location.hostname;
-  return `<div class="notice" style="margin-top:10px"><b>To activate this domain</b><br>1. At the company's DNS provider add a <b>CNAME</b> record: name <b>${esc(host)}</b> pointing to <b>${esc(p)}</b>.<br>2. The platform administrator adds <b>${esc(d)}</b> to the hosting service, which then issues the HTTPS certificate automatically.<br>3. Once active, opening <b>https://${esc(d)}</b> shows this company's branded sign-in page and only this company's users can sign in there.</div>`;
+  const host=d.split(".")[0],ip=PLATFORM.server_ip||"";
+  return `<div class="notice" style="margin-top:10px"><b>To activate this domain</b><br>1. At the company's DNS provider add an <b>A</b> record: name <b>${esc(host)}</b>, value <b>${esc(ip)}</b> (remove an existing record with the same name first).<br>2. The platform administrator activates the HTTPS certificate on the server (script add-domain.sh with <b>${esc(d)}</b>).<br>3. Once active, opening <b>https://${esc(d)}</b> shows this company's login page and only its users can sign in there.</div>`;
 }
 async function saveDomain(){
   try{

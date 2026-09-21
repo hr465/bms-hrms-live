@@ -4,6 +4,7 @@ const crypto=require("crypto");
 const db=require("./db");
 const ZKLib=require("node-zklib");
 const {sendMail,sendMailEx,layout}=require("./mail");
+const {buildManualPdf}=require("./manual");
 const ExcelJS=require("exceljs");
 
 const app=express();
@@ -267,6 +268,7 @@ const platformBrand=async()=>({
   product:process.env.PLATFORM_PRODUCT||"Enterprise HRMS",
   short:process.env.PLATFORM_SHORT||"BMS",
   has_logo:!!await db.prepare("SELECT 1 x FROM images WHERE kind='platform' AND ref_id=0").get(),
+  server_ip:process.env.SERVER_IP||"15.252.60.243",
 });
 app.get("/api/branding",wrap(async(req,res)=>{
   const c=await companyByHost(req);
@@ -400,15 +402,37 @@ app.get("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
     (SELECT COUNT(*) FROM employees e WHERE e.company_id=c.id AND e.status='Active') employee_count
     FROM companies c ORDER BY c.id DESC`).all());
 }));
+function normalizeDomain(raw){
+  const d=String(raw||"").trim().toLowerCase().replace(/^https?:\/\//,"").replace(/\/.*$/,"");
+  if(!d)return {d:""};
+  if(!/^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(d))return {error:"Enter a valid domain such as hr.example.com"};
+  if(d.endsWith(".onrender.com"))return {error:"Use the company's own domain, not the platform address"};
+  return {d};
+}
+const manualOpts=async(req,companyId)=>{
+  const c=await db.prepare("SELECT name,custom_domain FROM companies WHERE id=?").get(companyId);
+  const platformUrl=process.env.PLATFORM_URL||`${req.protocol}://${req.get("host")}`;
+  return {company:c?.name||"Your Company",portalUrl:c?.custom_domain?`https://${c.custom_domain}`:platformUrl,platformUrl,serverIp:process.env.SERVER_IP||"15.252.60.243",platform:process.env.PLATFORM_NAME?`${process.env.PLATFORM_NAME} ${process.env.PLATFORM_PRODUCT||"HR Platform"}`:"BMS Enterprise HRMS"};
+};
+app.get("/api/training-manual",auth,requireCompany,roles("Super Admin","HR Admin","Director"),wrap(async(req,res)=>{
+  const pdf=await buildManualPdf(await manualOpts(req,req.user.company_id));
+  res.set({"Content-Type":"application/pdf","Content-Disposition":'attachment; filename="HR-Portal-Training-Manual.pdf"'});res.send(pdf);
+}));
+app.get("/api/companies/:id/training-manual",auth,roles("Super Admin"),wrap(async(req,res)=>{
+  const pdf=await buildManualPdf(await manualOpts(req,Number(req.params.id)));
+  res.set({"Content-Type":"application/pdf","Content-Disposition":'attachment; filename="HR-Portal-Training-Manual.pdf"'});res.send(pdf);
+}));
 app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
   const x=req.body;
   if(!x.name||!x.code)return res.status(400).json({error:"Company name and code are required"});
   if(!x.admin_username||!x.admin_password)return res.status(400).json({error:"First HR Admin username and password are required"});
   if(x.admin_password.length<8)return res.status(400).json({error:"Admin password must be at least 8 characters"});
+  const dom=normalizeDomain(x.domain);if(dom.error)return res.status(400).json({error:dom.error});
+  if(dom.d&&await db.prepare("SELECT id FROM companies WHERE LOWER(custom_domain)=?").get(dom.d))return res.status(400).json({error:"This domain is already assigned to another company"});
   if(await db.prepare("SELECT id FROM users WHERE username=?").get(x.admin_username))return res.status(400).json({error:"Username already taken"});
   try{
-    const c=await db.prepare("INSERT INTO companies(name,code,industry,address,contact_email,contact_phone,status,smtp_user,smtp_pass) VALUES(?,?,?,?,?,?,?,?,?)")
-      .run(x.name,x.code.toUpperCase(),x.industry||"",x.address||"",x.contact_email||"",x.contact_phone||"","Active",x.smtp_user||null,x.smtp_pass||null);
+    const c=await db.prepare("INSERT INTO companies(name,code,industry,address,contact_email,contact_phone,status,smtp_user,smtp_pass,custom_domain) VALUES(?,?,?,?,?,?,?,?,?,?)")
+      .run(x.name,x.code.toUpperCase(),x.industry||"",x.address||"",x.contact_email||"",x.contact_phone||"","Active",x.smtp_user||null,x.smtp_pass||null,dom.d||null);
     const companyId=c.lastInsertRowid;
     await seedCompanyDefaults(companyId);
     if(x.logo){try{await storeImage("company",companyId,companyId,x.logo)}catch(e){console.warn("logo skipped:",e.message)}}
@@ -416,18 +440,23 @@ app.post("/api/companies",auth,roles("Super Admin"),wrap(async(req,res)=>{
     await db.prepare("INSERT INTO users(company_id,username,password_hash,role,email) VALUES(?,?,?,?,?)").run(companyId,x.admin_username,hash(x.admin_password,s),"HR Admin",x.contact_email||null);
     await audit(req,"ONBOARD","COMPANY",x.name);
     if(x.contact_email){
-      const brand=process.env.PLATFORM_NAME||"the HR portal";
-      const link=`${req.protocol}://${req.get("host")}`;
+      // Sent from the platform's own sender (not the company's Gmail, which is still being set up).
+      const opts=await manualOpts(req,companyId);
+      const ip=process.env.SERVER_IP||"15.252.60.243";
+      const domainBlock=dom.d?`<p><b>Your own web address:</b> https://${esc2(dom.d)}<br>To switch it on, add one DNS record at your domain provider: <b>Type A, Name ${esc2(dom.d.split(".")[0])}, Value ${esc2(ip)}</b>. Then tell us and we will activate the secure (HTTPS) certificate. Until then, use the login address above.</p>`:"";
+      let att;try{att=[{filename:"HR-Portal-Training-Manual.pdf",content:await buildManualPdf(opts),contentType:"application/pdf"}]}catch(e){console.error("manual pdf",e.message)}
       sendMail(x.contact_email,`Welcome to the HR portal — ${x.name}`,layout("Your company workspace is ready",
         `<p>Hi,</p><p>The HR workspace for <b>${esc2(x.name)}</b> has been created. You have been set up as the <b>HR Admin</b> with full access to your company.</p>
-         <p><b>Login URL:</b> ${esc2(link)}<br><b>Username:</b> ${esc2(x.admin_username)}<br><b>Password:</b> ${x.send_password?esc2(x.admin_password):"(shared with you separately)"}</p>
+         <p><b>Login URL:</b> ${esc2(opts.platformUrl)}<br><b>Username:</b> ${esc2(x.admin_username)}<br><b>Password:</b> ${x.send_password?esc2(x.admin_password):"(shared with you separately)"}</p>
+         ${domainBlock}
          <p><b>Getting started</b></p>
          <ol style="padding-left:18px;line-height:1.6"><li>Sign in and change your password (Password button, top right).</li>
          <li>Open HR Policies and set the company profile, letterhead, working hours and email settings.</li>
          <li>Open Team to create logins for your Director, Finance and Managers.</li>
-         <li>Add your employees and create their logins from the Employees page.</li></ol>
-         <p>Your employees will receive their own login by email once you create it.</p>`),
-        {smtp_user:x.smtp_user,smtp_pass:x.smtp_pass,name:x.name,company_id:companyId}).catch(()=>{});
+         <li>Add your employees and create their logins from the Employees page.</li>
+         <li>Connect the biometric device: server address <b>${esc2(ip)}</b>, port <b>80</b> (details in the attached manual).</li></ol>
+         <p>The attached training manual explains every step for HR, managers, finance, directors and employees.</p>`),
+        {name:x.name,company_id:companyId},att).catch(()=>{});
     }
     res.json({ok:true,id:companyId});
   }catch(e){res.status(400).json({error:/duplicate key|unique/i.test(e.message)?"Company code already exists":e.message})}
